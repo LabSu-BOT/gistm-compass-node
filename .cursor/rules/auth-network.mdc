@@ -1,0 +1,36 @@
+---
+description: Auth NextAuth v5, roles ADMIN/MEMBER e bind de rede do dev
+globs: src/auth.ts,src/app/login/**,src/app/cadastro/**,src/app/conta/**,src/app/organizacao/**,src/types/next-auth.d.ts,src/lib/auth-actions.ts
+alwaysApply: false
+---
+
+# Auth e rede
+
+## Sessão (`src/auth.ts` + `src/types/next-auth.d.ts`)
+
+JWT com `user: { id, email, name, organizationId, role }`. Roles: `ADMIN` | `MEMBER`.
+
+- Credentials + bcrypt; e-mail lowercased
+- Lock após **5** falhas por **15 min** (`AccountLockedError` / `conta_bloqueada`)
+- Cadastro cria Organization + primeiro user `ADMIN`
+- **Não há `middleware.ts`** — proteja página a página / action a action com `auth()`
+
+## trustHost e bind
+
+```json
+"dev": "next dev -H 127.0.0.1",
+"dev:lan": "next dev -H 0.0.0.0"
+```
+
+- `trustHost: true` **sempre** — desligar quebra login (`UntrustedHost`)
+- Exposição de rede = bind do processo, não essa flag
+
+## Postgres local
+
+`docker compose up -d` (porta host **5433**).
+- App: `DATABASE_URL` → role `gistm_app` (RLS ativo)
+- Migrate/seed: `DATABASE_ADMIN_URL` → role `gistm` via `npm run db:migrate` / `npm run db:seed`
+
+## Cadastro público
+
+`ALLOW_PUBLIC_SIGNUP=true` só em dev; produção `false`. Gate em `src/lib/signup-policy.ts`.

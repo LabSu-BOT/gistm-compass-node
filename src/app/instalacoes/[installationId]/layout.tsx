@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { getInstallationContext } from "@/lib/context";
 import { Sidebar } from "@/components/Sidebar";
 import { auth } from "@/auth";
-import { prisma } from "@/lib/prisma";
+import { withOrgContext } from "@/lib/tenant-db";
 
 export async function generateMetadata({
   params,
@@ -29,11 +29,13 @@ export default async function InstallationLayout({
 
   // Alimenta o seletor de instalação do menu. Escopado à organização da
   // sessão — o mesmo limite que `getInstallationContext` já aplica.
-  const installations = await prisma.installation.findMany({
-    where: { organizationId: session!.user.organizationId },
-    select: { id: true, name: true },
-    orderBy: { name: "asc" },
-  });
+  const installations = await withOrgContext(session!.user.organizationId, async (tx) =>
+    tx.installation.findMany({
+      where: { organizationId: session!.user.organizationId },
+      select: { id: true, name: true },
+      orderBy: { name: "asc" },
+    })
+  );
 
   return (
     <div className="flex flex-1 min-w-0">

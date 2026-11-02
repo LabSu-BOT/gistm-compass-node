@@ -1,0 +1,37 @@
+---
+description: Convenções Next.js 16 usadas neste repo (params Promise, App Router)
+globs: src/app/**/*.tsx,src/app/**/*.ts,next.config.ts
+alwaysApply: false
+---
+
+# Next.js 16 neste repo
+
+`AGENTS.md`: esta versão tem breaking changes. Antes de APIs novas, leia `node_modules/next/dist/docs/`.
+
+## Padrões já usados
+
+```ts
+// params e searchParams são Promise — sempre await
+export default async function Page({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ installationId: string }>;
+  searchParams: Promise<{ cycle?: string; lang?: string }>;
+}) {
+  const { installationId } = await params;
+  const { cycle, lang } = await searchParams;
+  // ...
+}
+```
+
+Mesmo padrão em layouts, `generateMetadata` e Route Handlers.
+
+## Outros
+
+- i18n: query `?lang=en|pt` (não next-intl)
+- Ciclo: `?cycle=<id>`; default = mais recente via `getInstallationContext`
+- React 19: `useFormStatus` em `SubmitButton.tsx`
+- Tailwind v4: `@import "tailwindcss"` + `@theme` em `globals.css` (sem `tailwind.config` clássico)
+- Alias `@/*` → `./src/*`
+- `serverExternalPackages: ["pdf-parse"]` em `next.config.ts`

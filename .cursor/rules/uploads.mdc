@@ -1,0 +1,33 @@
+---
+description: Validação de upload, nomes em disco e extração de texto
+globs: src/app/**/documentos/**,src/lib/upload-limits.ts,src/lib/text-extraction.ts
+alwaysApply: false
+---
+
+# Uploads
+
+Canon: `src/lib/upload-limits.ts` + `documentos/actions.ts`.
+
+## Obrigatório antes de gravar
+
+```ts
+assertUploadAllowed(file, ext); // allow-list + máx. 50MB
+const storedName = `${randomUUID()}${ext}`; // NUNCA o nome original
+// grava em uploads/ (process.cwd()); DB: fileName=original, filePath=storedName
+```
+
+## Extensões
+
+`.pdf .doc .docx .xls .xlsx .ppt .pptx .txt .md .csv .png .jpg .jpeg .gif .webp`
+
+## Extração
+
+`src/lib/text-extraction.ts` lê texto de `.txt/.md/.docx/.xlsx/.pdf` (cap ~200k chars). Demais formatos podem ter `extractedText: null`.
+
+## Config
+
+`next.config.ts`: `experimental.serverActions.bodySizeLimit: "100mb"` (importação de pasta). Não reduzir sem necessidade.
+
+## Serving
+
+Rotas que leem arquivo do disco: sessão + ownership/org; falha cross-tenant → **404**.

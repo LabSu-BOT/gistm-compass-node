@@ -45,41 +45,39 @@ técnico; a IA acelera a leitura, não substitui o julgamento.
 
 - **Next.js 16** (App Router) + **TypeScript** + **Tailwind CSS** — front-end e
   back-end no mesmo projeto, com Server Actions nas mutações.
-- **Prisma** + **SQLite** em desenvolvimento (para produção, trocar o provider
-  para PostgreSQL e apontar `DATABASE_URL`).
+- **Prisma** + **PostgreSQL** (Docker local na porta `5433`; VPS em produção).
 - **NextAuth (Auth.js v5)** — autenticação por credenciais e multi-tenant.
+- **Storage** — pasta `uploads/` em dev (`STORAGE_DRIVER=local`) ou S3-compatível
+  em produção (`STORAGE_DRIVER=s3`, ex. Azure Blob).
 - **Anthropic API** — camada de IA agêntica (`src/lib/ai-agent.ts`).
 
 ## Executando localmente
 
-Pré-requisitos: Node.js 20+.
+Pré-requisitos: Node.js 20+ e Docker.
 
 ```bash
 npm install
-cp .env.example .env      # preencha DATABASE_URL, AUTH_SECRET e ANTHROPIC_API_KEY
+docker compose up -d
+cp .env.example .env      # AUTH_SECRET, opcionalmente ANTHROPIC_API_KEY
+npm run db:migrate
 npx prisma generate
+npm run db:seed
 npm run dev
 ```
 
-Acesse [http://localhost:3000](http://localhost:3000). Para explorar com dados
-fictícios, use o login de demonstração `demo@gistmcompass.com` / `demo12345`
-(criado pelo seed). Para começar do zero como um novo cliente, use "Criar
-organização" na tela de login.
+Acesse [http://127.0.0.1:3000](http://127.0.0.1:3000). Login de demonstração:
+`demo@gistmcompass.com` / `demo12345`. Com `ALLOW_PUBLIC_SIGNUP=true` (padrão
+do `.env.example`), também dá para criar organização em `/cadastro`.
 
-O recurso de IA (assistente e leitura por requisito) exige uma
-`ANTHROPIC_API_KEY` válida; o restante da plataforma funciona sem ela.
+O recurso de IA exige `ANTHROPIC_API_KEY`; o restante funciona sem ela.
 
 ### Dados de demonstração
 
-O banco de desenvolvimento já vem com o conteúdo oficial do GISTM e três
-estruturas de exemplo. Para redefinir ao estado limpo:
+Para redefinir o Postgres local ao estado limpo:
 
 ```bash
-npx prisma db seed
+npm run db:seed
 ```
-
-> Pare o servidor (`npm run dev`) antes de rodar o seed — duas escritas
-> simultâneas no SQLite corrompem o banco no Windows.
 
 Para um cenário mais rico (estruturas em diferentes estágios de maturidade):
 
@@ -118,11 +116,12 @@ servidor local.
 
 ## Status e próximos passos
 
-Para operação como produto em produção, estão previstos:
+Base de produção (Prioridade 1) já no repo: Postgres + índices, RLS por org,
+middleware de auth, cadastro gated por env e storage local/S3.
 
-- Hospedagem em nuvem e migração de SQLite para **PostgreSQL** gerenciado.
-- Armazenamento de arquivos em **object storage** (hoje em disco local).
+Ainda previstos:
+
 - Autenticação corporativa (**SSO/AD**), verificação e convite por e-mail.
+- Jobs assíncronos para IA/extração e quotas por organização.
 - Rotina de **backup** e monitoramento.
-- Adequação à **LGPD** para o tratamento de dados dos clientes.
-"# gistm-compass" 
+- Adequação à **LGPD** para o tratamento de dados dos clientes. 

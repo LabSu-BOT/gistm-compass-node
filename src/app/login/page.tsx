@@ -2,6 +2,7 @@ import Link from "next/link";
 import { CompassMark } from "@/components/CompassMark";
 import { loginAction } from "./actions";
 import { SubmitButton } from "@/components/SubmitButton";
+import { isPublicSignupAllowed } from "@/lib/signup-policy";
 
 export default async function LoginPage({
   searchParams,
@@ -9,6 +10,7 @@ export default async function LoginPage({
   searchParams: Promise<{ erro?: string }>;
 }) {
   const { erro } = await searchParams;
+  const signupAllowed = isPublicSignupAllowed();
 
   return (
     <div className="flex min-h-screen w-full items-center justify-center bg-brand-800 px-6 py-12">
@@ -47,12 +49,14 @@ export default async function LoginPage({
           </SubmitButton>
         </form>
 
-        <p className="mt-4 text-center text-sm text-mineral-500">
-          Ainda não tem uma conta?{" "}
-          <Link href="/cadastro" className="font-medium text-brand-300 hover:underline">
-            Criar organização
-          </Link>
-        </p>
+        {signupAllowed && (
+          <p className="mt-4 text-center text-sm text-mineral-500">
+            Ainda não tem uma conta?{" "}
+            <Link href="/cadastro" className="font-medium text-brand-300 hover:underline">
+              Criar organização
+            </Link>
+          </p>
+        )}
       </div>
     </div>
   );

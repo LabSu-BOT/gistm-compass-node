@@ -2,10 +2,15 @@
 
 import bcrypt from "bcryptjs";
 import { AuthError } from "next-auth";
-import { prisma } from "@/lib/prisma";
 import { signIn } from "@/auth";
+import { isPublicSignupAllowed } from "@/lib/signup-policy";
+import { withRlsBypass } from "@/lib/tenant-db";
 
 export async function signupAction(formData: FormData) {
+  if (!isPublicSignupAllowed()) {
+    throw new Error("Cadastro público de organização está desabilitado.");
+  }
+
   const orgName = String(formData.get("orgName") ?? "").trim();
   const name = String(formData.get("name") ?? "").trim();
   const email = String(formData.get("email") ?? "")
@@ -20,15 +25,17 @@ export async function signupAction(formData: FormData) {
     throw new Error("A senha deve ter pelo menos 8 caracteres.");
   }
 
-  const existing = await prisma.user.findUnique({ where: { email } });
-  if (existing) {
-    throw new Error("Já existe uma conta cadastrada com esse email.");
-  }
+  await withRlsBypass(async (tx) => {
+    const existing = await tx.user.findUnique({ where: { email } });
+    if (existing) {
+      throw new Error("Já existe uma conta cadastrada com esse email.");
+    }
 
-  const passwordHash = await bcrypt.hash(password, 10);
-  const organization = await prisma.organization.create({ data: { name: orgName } });
-  await prisma.user.create({
-    data: { email, passwordHash, name, organizationId: organization.id, role: "ADMIN" },
+    const passwordHash = await bcrypt.hash(password, 10);
+    const organization = await tx.organization.create({ data: { name: orgName } });
+    await tx.user.create({
+      data: { email, passwordHash, name, organizationId: organization.id, role: "ADMIN" },
+    });
   });
 
   try {

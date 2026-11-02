@@ -1,9 +1,15 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { CompassMark } from "@/components/CompassMark";
 import { signupAction } from "./actions";
 import { SubmitButton } from "@/components/SubmitButton";
+import { isPublicSignupAllowed } from "@/lib/signup-policy";
 
 export default function CadastroPage() {
+  if (!isPublicSignupAllowed()) {
+    redirect("/login");
+  }
+
   return (
     <div className="flex min-h-screen w-full items-center justify-center bg-brand-800 px-6 py-12">
       <div className="w-full max-w-sm">

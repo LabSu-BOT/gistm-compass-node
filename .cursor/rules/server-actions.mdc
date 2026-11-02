@@ -1,0 +1,40 @@
+---
+description: Padrão de Server Actions — ownership, FormData, revalidatePath
+globs: src/app/**/actions.ts,src/lib/auth-actions.ts
+alwaysApply: false
+---
+
+# Server Actions
+
+Mutações vivem em `actions.ts` colocalizados (`"use server"`). Quase não há REST — só NextAuth + download de arquivo.
+
+## Esqueleto
+
+```ts
+"use server";
+
+export async function minhaAction(installationId: string, formData: FormData) {
+  await assertInstallationOwnership(installationId);
+  // se houver resourceId: assertXBelongsToInstallation(...)
+
+  const campo = String(formData.get("campo") ?? "").trim();
+  if (!campo) throw new Error("Campo obrigatório.");
+
+  await prisma.algo.update({ ... });
+  revalidatePath(`/instalacoes/${installationId}/...`);
+}
+```
+
+## Convenções
+
+- Parse manual de `FormData` (zod está no package, mas **não** é o padrão do repo).
+- Erros de validação: `throw new Error("mensagem em PT")`.
+- Sem sessão / cross-org: `redirect` / `notFound` via helpers de contexto.
+- Role ADMIN quando necessário: espelhar `organizacao/usuarios/actions.ts` (`requireAdmin`).
+- Ciclo fechado: respeitar `isLatestCycle` / guards já existentes — não mutar ciclo histórico sem intenção explícita.
+
+## Não fazer
+
+- CRUD genérico em Route Handlers
+- Pular ownership "porque a página já checou"
+- Inventar padrão novo sem olhar um `actions.ts` vizinho

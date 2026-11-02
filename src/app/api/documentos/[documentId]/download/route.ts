@@ -1,9 +1,6 @@
-import { readFile } from "node:fs/promises";
-import path from "node:path";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-
-const UPLOAD_DIR = path.join(process.cwd(), "uploads");
+import { getStorage } from "@/lib/storage";
 
 export async function GET(
   _request: Request,
@@ -26,7 +23,7 @@ export async function GET(
 
   let buffer: Buffer;
   try {
-    buffer = await readFile(path.join(UPLOAD_DIR, document.filePath));
+    buffer = await getStorage().get(document.filePath);
   } catch {
     return new Response("Arquivo não encontrado no armazenamento.", { status: 404 });
   }

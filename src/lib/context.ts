@@ -1,6 +1,7 @@
 import { notFound, redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { auth } from "@/auth";
+import { withOrgContext } from "@/lib/tenant-db";
 
 /**
  * Toda página/ação dentro de /instalacoes/[installationId] recebe o id da
@@ -21,29 +22,31 @@ export async function getInstallationContext(installationId: string, cycleId?: s
   const session = await auth();
   if (!session?.user) redirect("/login");
 
-  const installation = await prisma.installation.findUnique({
-    where: { id: installationId },
+  return withOrgContext(session.user.organizationId, async (tx) => {
+    const installation = await tx.installation.findUnique({
+      where: { id: installationId },
+    });
+    if (!installation || installation.organizationId !== session.user.organizationId) {
+      notFound();
+    }
+
+    const cycle = cycleId
+      ? await tx.cycle.findFirst({ where: { id: cycleId, installationId } })
+      : await tx.cycle.findFirst({
+          where: { installationId },
+          orderBy: { startedAt: "desc" },
+        });
+    if (!cycle) notFound();
+
+    const allCycles = await tx.cycle.findMany({
+      where: { installationId },
+      orderBy: { startedAt: "desc" },
+    });
+
+    const isLatestCycle = allCycles[0]?.id === cycle.id;
+
+    return { installation, cycle, allCycles, isLatestCycle };
   });
-  if (!installation || installation.organizationId !== session.user.organizationId) {
-    notFound();
-  }
-
-  const cycle = cycleId
-    ? await prisma.cycle.findFirst({ where: { id: cycleId, installationId } })
-    : await prisma.cycle.findFirst({
-        where: { installationId },
-        orderBy: { startedAt: "desc" },
-      });
-  if (!cycle) notFound();
-
-  const allCycles = await prisma.cycle.findMany({
-    where: { installationId },
-    orderBy: { startedAt: "desc" },
-  });
-
-  const isLatestCycle = allCycles[0]?.id === cycle.id;
-
-  return { installation, cycle, allCycles, isLatestCycle };
 }
 
 /**
@@ -56,10 +59,13 @@ export async function assertInstallationOwnership(installationId: string) {
   const session = await auth();
   if (!session?.user) redirect("/login");
 
-  const installation = await prisma.installation.findUnique({
-    where: { id: installationId },
+  return withOrgContext(session.user.organizationId, async (tx) => {
+    const installation = await tx.installation.findUnique({
+      where: { id: installationId },
+    });
+    if (!installation || installation.organizationId !== session.user.organizationId) {
+      notFound();
+    }
+    return installation;
   });
-  if (!installation || installation.organizationId !== session.user.organizationId) {
-    notFound();
-  }
 }

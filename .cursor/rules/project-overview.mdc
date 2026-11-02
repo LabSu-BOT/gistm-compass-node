@@ -1,0 +1,36 @@
+---
+description: Visão geral do GISTM Compass — domínio, stack e mapa de pastas
+alwaysApply: true
+---
+
+# GISTM Compass
+
+Plataforma multi-tenant da **MGLS** para conformidade com o GISTM (Global Industry Standard on Tailings Management): 6 tópicos → 15 princípios → 77 requisitos. A IA sugere; o revisor humano decide.
+
+## Stack
+
+- Next.js **16.2** (App Router em `src/app/`) + React 19 + TypeScript
+- Prisma 6 + SQLite local (`prisma/dev.db`); produção → PostgreSQL
+- NextAuth v5 (Credentials + JWT) em `src/auth.ts`
+- Tailwind v4 + tokens em `src/app/globals.css` (sistema "Petróleo")
+- Anthropic em `src/lib/ai-*.ts` (opcional via `ANTHROPIC_API_KEY`)
+
+## Mapa rápido
+
+| Área | Caminho |
+|------|---------|
+| Páginas / actions | `src/app/` (rotas em PT: `instalacoes`, `requisitos`, …) |
+| Ownership | `src/lib/context.ts` |
+| Upload | `src/lib/upload-limits.ts` |
+| UI kit | `src/components/ui.tsx` |
+| Schema | `prisma/schema.prisma` |
+| Texto oficial GISTM | `prisma/gistm-content.ts` + seed |
+| Docs Next 16 | `node_modules/next/dist/docs/` (ler antes de APIs novas) |
+
+## Regras de ouro
+
+1. Next 16 ≠ treinamento — consulte `node_modules/next/dist/docs/`.
+2. Mutações de instalação: `assertInstallationOwnership` / `getInstallationContext`.
+3. Cross-tenant → **404**, nunca 403.
+4. Após mudanças relevantes: `npx tsc --noEmit`.
+5. Comentários de código em português, só quando o "porquê" não for óbvio.

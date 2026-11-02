@@ -2,8 +2,8 @@
 
 import bcrypt from "bcryptjs";
 import { redirect } from "next/navigation";
-import { prisma } from "@/lib/prisma";
 import { auth } from "@/auth";
+import { withOrgContext } from "@/lib/tenant-db";
 
 export async function changeOwnPassword(formData: FormData) {
   const session = await auth();
@@ -23,14 +23,16 @@ export async function changeOwnPassword(formData: FormData) {
     throw new Error("A confirmação não bate com a nova senha.");
   }
 
-  const user = await prisma.user.findUniqueOrThrow({ where: { id: session.user.id } });
-  const valid = await bcrypt.compare(currentPassword, user.passwordHash);
-  if (!valid) {
-    throw new Error("Senha atual incorreta.");
-  }
+  await withOrgContext(session.user.organizationId, async (tx) => {
+    const user = await tx.user.findUniqueOrThrow({ where: { id: session.user.id } });
+    const valid = await bcrypt.compare(currentPassword, user.passwordHash);
+    if (!valid) {
+      throw new Error("Senha atual incorreta.");
+    }
 
-  const passwordHash = await bcrypt.hash(newPassword, 10);
-  await prisma.user.update({ where: { id: user.id }, data: { passwordHash } });
+    const passwordHash = await bcrypt.hash(newPassword, 10);
+    await tx.user.update({ where: { id: user.id }, data: { passwordHash } });
+  });
 
   redirect("/conta?sucesso=1");
 }

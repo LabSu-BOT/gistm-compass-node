@@ -1,0 +1,41 @@
+---
+description: Modelo de domínio GISTM — catálogo, assessment, evidência, ciclos
+globs: prisma/**,src/lib/assessments.ts,src/lib/ai-*.ts,src/app/instalacoes/**/requisitos/**,src/app/instalacoes/**/planos-de-acao/**
+alwaysApply: false
+---
+
+# Domínio GISTM
+
+## Catálogo global (não multi-tenant)
+
+```
+Principle (tópico GISTM) → Theme (princípio GISTM) → Requirement
+```
+
+Atenção: no Prisma, `Principle` = tópico; `Theme` = princípio. Texto oficial: `prisma/gistm-content.ts`.
+
+## Escopo por cliente
+
+```
+Organization → User
+            → Installation (estrutura / facility)
+                 → Cycle
+                 → DocumentFile → Evidence → Requirement
+                 → Assessment (unique: requirement + installation + cycle)
+                 → ExternalAnalysis (installation + requirement; sem ciclo)
+Assessment → Action, Comment, AuditLog, AssessmentRevision
+```
+
+## Avaliação
+
+- Campos `ai*` = sugestão; `final*` = decisão humana
+- `ReviewStatus`: `SUGESTAO_IA` | `EM_REVISAO` | `VALIDADO`
+- Validação humana grava `AssessmentRevision` + `AuditLog`
+- **Nunca** promover sugestão de IA a final sem revisor
+- Helper: `getOrCreateAssessment` em `src/lib/assessments.ts`
+
+## IA
+
+- Agente: `src/lib/ai-agent.ts` (lista/busca/lê docs da instalação)
+- Fallback heurístico: `src/lib/ai-simulator.ts`
+- Respostas ancoradas nos documentos; se não achar, declarar — não inventar

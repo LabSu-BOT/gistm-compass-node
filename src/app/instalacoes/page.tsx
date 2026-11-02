@@ -1,6 +1,5 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { prisma } from "@/lib/prisma";
 import { computeInstallationStats } from "@/lib/installation-stats";
 import { createInstallation, deleteInstallation } from "./actions";
 import { Card, CardHeader, EmptyState } from "@/components/ui";
@@ -9,6 +8,7 @@ import { CompassMark } from "@/components/CompassMark";
 import { Plus, Trash2, BarChart3, LogOut, Users } from "lucide-react";
 import { auth } from "@/auth";
 import { logoutAction } from "@/lib/auth-actions";
+import { withOrgContext } from "@/lib/tenant-db";
 
 export const dynamic = "force-dynamic";
 
@@ -22,13 +22,15 @@ export default async function InstalacoesPage({
 
   const { q = "" } = await searchParams;
 
-  const installations = await prisma.installation.findMany({
-    where: {
-      organizationId: session.user.organizationId,
-      ...(q ? { name: { contains: q } } : {}),
-    },
-    orderBy: { name: "asc" },
-  });
+  const installations = await withOrgContext(session.user.organizationId, async (tx) =>
+    tx.installation.findMany({
+      where: {
+        organizationId: session.user.organizationId,
+        ...(q ? { name: { contains: q } } : {}),
+      },
+      orderBy: { name: "asc" },
+    })
+  );
 
   const rows = await Promise.all(
     installations.map(async (installation) => ({

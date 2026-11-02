@@ -8,13 +8,15 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "db:seed": "tsx prisma/seed.ts"
+    "db:migrate": "node scripts/db-migrate.mjs",
+    "db:seed": "node scripts/db-seed.mjs"
   },
   "prisma": {
-    "seed": "tsx prisma/seed.ts"
+    "seed": "node scripts/db-seed.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.112.4",
+    "@aws-sdk/client-s3": "^3.1161.0",
     "@prisma/client": "6.19.3",
     "bcryptjs": "^3.0.3",
     "clsx": "^2.1.1",

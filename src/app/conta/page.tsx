@@ -1,8 +1,8 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { ArrowLeft, ShieldCheck } from "lucide-react";
-import { prisma } from "@/lib/prisma";
 import { auth } from "@/auth";
+import { withOrgContext } from "@/lib/tenant-db";
 import { Card, CardHeader } from "@/components/ui";
 import { SubmitButton } from "@/components/SubmitButton";
 import { changeOwnPassword } from "./actions";
@@ -18,9 +18,12 @@ export default async function ContaPage({
   if (!session?.user) redirect("/login");
   const { sucesso } = await searchParams;
 
-  const user = await prisma.user.findUniqueOrThrow({ where: { id: session.user.id } });
-  const organization = await prisma.organization.findUniqueOrThrow({
-    where: { id: session.user.organizationId },
+  const { user, organization } = await withOrgContext(session.user.organizationId, async (tx) => {
+    const user = await tx.user.findUniqueOrThrow({ where: { id: session.user.id } });
+    const organization = await tx.organization.findUniqueOrThrow({
+      where: { id: session.user.organizationId },
+    });
+    return { user, organization };
   });
 
   return (

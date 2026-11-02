@@ -1,12 +1,12 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
-import { prisma } from "@/lib/prisma";
 import { computeInstallationStats } from "@/lib/installation-stats";
 import { complianceColor } from "@/lib/compliance-color";
 import { ReadinessGauge } from "@/components/ReadinessGauge";
 import { Card, CardHeader } from "@/components/ui";
 import { auth } from "@/auth";
+import { withOrgContext } from "@/lib/tenant-db";
 
 export const dynamic = "force-dynamic";
 
@@ -14,10 +14,12 @@ export default async function CompararInstalacoesPage() {
   const session = await auth();
   if (!session?.user) redirect("/login");
 
-  const installations = await prisma.installation.findMany({
-    where: { organizationId: session.user.organizationId },
-    orderBy: { name: "asc" },
-  });
+  const installations = await withOrgContext(session.user.organizationId, async (tx) =>
+    tx.installation.findMany({
+      where: { organizationId: session.user.organizationId },
+      orderBy: { name: "asc" },
+    })
+  );
 
   const rows = await Promise.all(
     installations.map(async (installation) => ({

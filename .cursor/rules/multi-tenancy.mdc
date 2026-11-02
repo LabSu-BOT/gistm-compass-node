@@ -1,0 +1,44 @@
+---
+description: Isolamento multi-tenant por Organization e ownership de instalação
+globs: src/app/**/*.ts,src/app/**/*.tsx,src/lib/context.ts
+alwaysApply: false
+---
+
+# Multi-tenancy
+
+Isolamento = `organizationId`. Instalação vem da **URL**, nunca de cookie/sessão global (abas paralelas).
+
+## Helpers canônicos (`src/lib/context.ts`)
+
+```ts
+// Páginas / layouts — sessão + org + ciclo (?cycle=)
+const { installation, cycle, isLatestCycle } = await getInstallationContext(installationId, cycleId);
+
+// Server Actions — checagem enxuta
+await assertInstallationOwnership(installationId);
+```
+
+Sem sessão → `redirect("/login")`. Org diferente → `notFound()` (**404**).
+
+## Recursos filhos
+
+Depois do ownership, confirme o vínculo:
+
+```ts
+// documento → document.installationId === installationId
+// assessment → assessment.installationId === installationId
+// action → via assessment.installation
+```
+
+Referências: `documentos/actions.ts`, `requisitos/actions.ts`, `planos-de-acao/actions.ts`.
+
+## Download HTTP
+
+`src/app/api/documentos/[documentId]/download/route.ts`: sessão obrigatória; doc de outra org → **404** (não 403).
+
+## Anti-padrões
+
+- Confiar só no `installationId` do FormData/URL sem checar org
+- Introduzir "instalação atual" em sessão/cookie
+- Retornar 403 em recurso alheio
+- Criar rota/action sem ownership

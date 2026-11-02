@@ -1,15 +1,12 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { mkdir, writeFile, unlink } from "node:fs/promises";
 import path from "node:path";
-import { randomUUID } from "node:crypto";
 import { prisma } from "@/lib/prisma";
 import { extractText } from "@/lib/text-extraction";
 import { assertInstallationOwnership } from "@/lib/context";
 import { assertUploadAllowed } from "@/lib/upload-limits";
-
-const UPLOAD_DIR = path.join(process.cwd(), "uploads");
+import { buildObjectKey, getStorage } from "@/lib/storage";
 
 function revalidateInstallation(installationId: string) {
   revalidatePath(`/instalacoes/${installationId}/documentos`);
@@ -19,7 +16,7 @@ function revalidateInstallation(installationId: string) {
 }
 
 export async function uploadDocument(installationId: string, formData: FormData) {
-  await assertInstallationOwnership(installationId);
+  const installation = await assertInstallationOwnership(installationId);
 
   const file = formData.get("file");
   const title = String(formData.get("title") ?? "").trim();
@@ -41,12 +38,11 @@ export async function uploadDocument(installationId: string, formData: FormData)
   const ext = path.extname(file.name).toLowerCase();
   assertUploadAllowed(file, ext);
 
-  await mkdir(UPLOAD_DIR, { recursive: true });
-  const storedFileName = `${randomUUID()}${ext}`;
-  const storedFilePath = path.join(UPLOAD_DIR, storedFileName);
-
+  const objectKey = buildObjectKey(installation.organizationId, installationId, ext);
   const buffer = Buffer.from(await file.arrayBuffer());
-  await writeFile(storedFilePath, buffer);
+  const mimeType = file.type || "application/octet-stream";
+  const storage = getStorage();
+  await storage.put(objectKey, buffer, mimeType);
 
   const extractedText = await extractText(buffer, ext);
 
@@ -61,8 +57,8 @@ export async function uploadDocument(installationId: string, formData: FormData)
       validUntil: validUntilRaw ? new Date(validUntilRaw) : null,
       previousVersionId: previousVersionId || null,
       fileName: file.name,
-      filePath: storedFileName,
-      mimeType: file.type || "application/octet-stream",
+      filePath: objectKey,
+      mimeType,
       extractedText,
       installationId,
     },
@@ -72,7 +68,7 @@ export async function uploadDocument(installationId: string, formData: FormData)
 }
 
 export async function importFolder(installationId: string, formData: FormData) {
-  await assertInstallationOwnership(installationId);
+  const installation = await assertInstallationOwnership(installationId);
 
   const files = formData.getAll("files").filter((f): f is File => f instanceof File && f.size > 0);
   const type = String(formData.get("type") ?? "").trim() || "Outro";
@@ -87,13 +83,14 @@ export async function importFolder(installationId: string, formData: FormData) {
     assertUploadAllowed(file, path.extname(file.name).toLowerCase());
   }
 
-  await mkdir(UPLOAD_DIR, { recursive: true });
+  const storage = getStorage();
 
   for (const file of files) {
     const ext = path.extname(file.name).toLowerCase();
-    const storedFileName = `${randomUUID()}${ext}`;
+    const objectKey = buildObjectKey(installation.organizationId, installationId, ext);
     const buffer = Buffer.from(await file.arrayBuffer());
-    await writeFile(path.join(UPLOAD_DIR, storedFileName), buffer);
+    const mimeType = file.type || "application/octet-stream";
+    await storage.put(objectKey, buffer, mimeType);
 
     const extractedText = await extractText(buffer, ext);
     const title = path.basename(file.name, ext);
@@ -105,8 +102,8 @@ export async function importFolder(installationId: string, formData: FormData) {
         areaResponsible: areaResponsible || null,
         confidentiality,
         fileName: file.name,
-        filePath: storedFileName,
-        mimeType: file.type || "application/octet-stream",
+        filePath: objectKey,
+        mimeType,
         extractedText,
         installationId,
       },
@@ -121,23 +118,16 @@ async function assertDocumentBelongsToInstallation(installationId: string, docum
   if (!document || document.installationId !== installationId) {
     throw new Error("Documento não encontrado nesta instalação.");
   }
+  return document;
 }
 
 export async function deleteDocument(installationId: string, documentId: string) {
   await assertInstallationOwnership(installationId);
-  await assertDocumentBelongsToInstallation(installationId, documentId);
-
-  const document = await prisma.documentFile.findUniqueOrThrow({ where: { id: documentId } });
+  const document = await assertDocumentBelongsToInstallation(installationId, documentId);
 
   await prisma.evidence.deleteMany({ where: { documentId } });
   await prisma.documentFile.delete({ where: { id: documentId } });
-
-  try {
-    await unlink(path.join(UPLOAD_DIR, document.filePath));
-  } catch {
-    // Arquivo já ausente do disco (ex.: removido manualmente) — a exclusão
-    // do registro no banco já é o que importa para o usuário.
-  }
+  await getStorage().delete(document.filePath);
 
   revalidateInstallation(installationId);
 }

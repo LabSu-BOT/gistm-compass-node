@@ -14,7 +14,14 @@ function firstSentence(text: string, maxLen: number): string {
 }
 
 async function main() {
+  // Com FORCE RLS, o seed precisa de bypass na conexão (ver migration enable_tenant_rls).
+  await prisma.$executeRaw`SELECT set_config('app.rls_bypass', 'on', false)`;
+
   console.log("Seed: limpando dados existentes...");
+  // Ordem respeita FKs (Postgres é estrito; ActionComment/ActionLog/ExternalAnalysis
+  // precisam sair antes das tabelas pai).
+  await prisma.actionComment.deleteMany();
+  await prisma.actionLog.deleteMany();
   await prisma.comment.deleteMany();
   await prisma.assessmentRevision.deleteMany();
   await prisma.justificationTemplate.deleteMany();
@@ -22,6 +29,7 @@ async function main() {
   await prisma.action.deleteMany();
   await prisma.evidence.deleteMany();
   await prisma.assessment.deleteMany();
+  await prisma.externalAnalysis.deleteMany();
   await prisma.documentFile.deleteMany();
   await prisma.requirement.deleteMany();
   await prisma.theme.deleteMany();

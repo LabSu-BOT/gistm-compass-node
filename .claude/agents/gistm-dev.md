@@ -8,6 +8,9 @@ GISTM (padrão global de gestão de barragens de rejeitos) em
 `gistm-compass/`. Next.js 16 + Prisma 6 + NextAuth v5 (beta) + Tailwind v4,
 banco SQLite local (`prisma/dev.db`).
 
+Contexto detalhado também em `AGENTS.md` e `.cursor/rules/*.mdc` — use-os
+como fonte de verdade e mantenha consistência com eles.
+
 ## Antes de escrever código
 
 - **`AGENTS.md` do projeto avisa: esta versão do Next.js tem breaking
@@ -15,6 +18,7 @@ banco SQLite local (`prisma/dev.db`).
   qualquer API do Next.js que não tenha certeza absoluta, leia o guia
   relevante em `node_modules/next/dist/docs/` — não assuma convenções de
   versões anteriores.
+- `params` e `searchParams` são `Promise` — sempre faça `await`.
 - Rode `npx tsc --noEmit` depois de qualquer mudança para pegar erros de
   tipo antes de reportar a tarefa como concluída.
 
@@ -22,13 +26,15 @@ banco SQLite local (`prisma/dev.db`).
 
 - **Toda server action ligada a uma instalação começa com
   `assertInstallationOwnership(installationId)`** (`src/lib/context.ts`) —
-  confere que a instalação pertence à organização do usuário logado. Ações
-  ligadas a um documento específico também confirmam
-  `document.installationId === installationId` antes de qualquer leitura ou
-  escrita (ver `assertDocumentBelongsToInstallation` em
-  `src/app/instalacoes/[installationId]/documentos/actions.ts` como
-  referência). Nunca adicione uma rota ou server action que leia/escreva
-  dados de instalação/documento sem essa checagem.
+  confere que a instalação pertence à organização do usuário logado. Páginas
+  usam `getInstallationContext`. Ações ligadas a um documento/assessment
+  específico também confirmam o vínculo com a instalação (ver
+  `assertDocumentBelongsToInstallation` em
+  `src/app/instalacoes/[installationId]/documentos/actions.ts` e o padrão
+  em `requisitos/actions.ts`). Nunca adicione uma rota ou server action que
+  leia/escreva dados de instalação/documento sem essa checagem.
+- Cross-tenant → **404** (`notFound()`), nunca 403.
+- Instalação vem da **URL**, nunca de cookie/sessão global.
 - **Qualquer novo caminho de upload deve passar por
   `assertUploadAllowed(file, ext)`** (`src/lib/upload-limits.ts`) — allow-list
   de extensões + limite de 50MB. Não escreva arquivo em disco sem validar
@@ -52,6 +58,19 @@ banco SQLite local (`prisma/dev.db`).
 - Login é `Credentials` provider do NextAuth com bcrypt + bloqueio após 5
   tentativas erradas (`src/auth.ts`). Mantenha esse controle ao tocar em
   auth.
+- Não há `middleware.ts` — proteção é por página/action com `auth()` +
+  ownership. Roles: `ADMIN` | `MEMBER`.
+
+## Domínio e mutações
+
+- Mutações = Server Actions colocalizadas (`**/actions.ts`). Route Handlers
+  só para NextAuth e download de arquivo.
+- Assessment: campos `ai*` são sugestão; `final*` exigem validação humana
+  (`AssessmentRevision` + `AuditLog`). Não gravar decisão final só com IA.
+- No Prisma, `Principle` = tópico GISTM; `Theme` = princípio GISTM. Texto
+  oficial em `prisma/gistm-content.ts`.
+- UI: `src/components/ui.tsx` + tokens "Petróleo" em `globals.css` — não
+  introduzir shadcn.
 
 ## Banco de dados
 

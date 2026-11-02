@@ -3,6 +3,8 @@ import Credentials from "next-auth/providers/credentials";
 import { CredentialsSignin } from "next-auth";
 import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/prisma";
+import { withRlsBypass } from "@/lib/tenant-db";
+import { authConfig } from "@/auth.config";
 import type { UserRole } from "@prisma/client";
 
 // Proteção simples contra força bruta: depois de MAX_FAILED_ATTEMPTS
@@ -18,14 +20,7 @@ export class AccountLockedError extends CredentialsSignin {
 }
 
 export const { handlers, signIn, signOut, auth } = NextAuth({
-  session: { strategy: "jwt" },
-  pages: { signIn: "/login" },
-  // trustHost só diz ao NextAuth pra confiar no Host header recebido — quem
-  // decide se a rede local consegue chegar nesse header é o bind do
-  // servidor (`npm run dev` escuta só em 127.0.0.1; `npm run dev:lan` expõe
-  // em 0.0.0.0 de propósito). Sem isso o NextAuth rejeita até localhost
-  // (UntrustedHost), então mantemos true nos dois casos.
-  trustHost: true,
+  ...authConfig,
   providers: [
     Credentials({
       credentials: { email: {}, password: {} },
@@ -36,60 +31,48 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         const password = String(credentials?.password ?? "");
         if (!email || !password) return null;
 
-        const user = await prisma.user.findUnique({ where: { email } });
-        if (!user) return null;
+        // Bypass RLS: login ainda não tem organizationId na sessão.
+        return withRlsBypass(async (tx) => {
+          const user = await tx.user.findUnique({ where: { email } });
+          if (!user) return null;
 
-        const lockExpired = user.lockedUntil !== null && user.lockedUntil <= new Date();
-        const failedAttempts = lockExpired ? 0 : user.failedLoginAttempts;
-        if (user.lockedUntil && !lockExpired) {
-          throw new AccountLockedError();
-        }
+          const lockExpired = user.lockedUntil !== null && user.lockedUntil <= new Date();
+          const failedAttempts = lockExpired ? 0 : user.failedLoginAttempts;
+          if (user.lockedUntil && !lockExpired) {
+            throw new AccountLockedError();
+          }
 
-        const valid = await bcrypt.compare(password, user.passwordHash);
-        if (!valid) {
-          const attempts = failedAttempts + 1;
-          const locked = attempts >= MAX_FAILED_ATTEMPTS;
-          await prisma.user.update({
-            where: { id: user.id },
-            data: {
-              failedLoginAttempts: locked ? 0 : attempts,
-              lockedUntil: locked ? new Date(Date.now() + LOCK_DURATION_MS) : null,
-            },
-          });
-          if (locked) throw new AccountLockedError();
-          return null;
-        }
+          const valid = await bcrypt.compare(password, user.passwordHash);
+          if (!valid) {
+            const attempts = failedAttempts + 1;
+            const locked = attempts >= MAX_FAILED_ATTEMPTS;
+            await tx.user.update({
+              where: { id: user.id },
+              data: {
+                failedLoginAttempts: locked ? 0 : attempts,
+                lockedUntil: locked ? new Date(Date.now() + LOCK_DURATION_MS) : null,
+              },
+            });
+            if (locked) throw new AccountLockedError();
+            return null;
+          }
 
-        if (user.failedLoginAttempts > 0 || user.lockedUntil) {
-          await prisma.user.update({
-            where: { id: user.id },
-            data: { failedLoginAttempts: 0, lockedUntil: null },
-          });
-        }
+          if (user.failedLoginAttempts > 0 || user.lockedUntil) {
+            await tx.user.update({
+              where: { id: user.id },
+              data: { failedLoginAttempts: 0, lockedUntil: null },
+            });
+          }
 
-        return {
-          id: user.id,
-          email: user.email,
-          name: user.name,
-          organizationId: user.organizationId,
-          role: user.role,
-        };
+          return {
+            id: user.id,
+            email: user.email,
+            name: user.name,
+            organizationId: user.organizationId,
+            role: user.role as UserRole,
+          };
+        });
       },
     }),
   ],
-  callbacks: {
-    jwt({ token, user }) {
-      if (user) {
-        token.organizationId = user.organizationId;
-        token.role = user.role;
-      }
-      return token;
-    },
-    session({ session, token }) {
-      session.user.id = token.sub!;
-      session.user.organizationId = token.organizationId as string;
-      session.user.role = token.role as UserRole;
-      return session;
-    },
-  },
 });

@@ -1,10 +1,9 @@
 "use server";
 
-import { redirect } from "next/navigation";
+import { redirect, notFound } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import { notFound } from "next/navigation";
-import { prisma } from "@/lib/prisma";
 import { auth } from "@/auth";
+import { withOrgContext } from "@/lib/tenant-db";
 
 export async function createInstallation(formData: FormData) {
   const session = await auth();
@@ -15,16 +14,20 @@ export async function createInstallation(formData: FormData) {
 
   if (!name) throw new Error("Informe o nome da instalação/estrutura.");
 
-  const installation = await prisma.installation.create({
-    data: {
-      name: location ? `${name} — ${location}` : name,
-      organizationId: session.user.organizationId,
-    },
-  });
+  const installation = await withOrgContext(session.user.organizationId, async (tx) => {
+    const created = await tx.installation.create({
+      data: {
+        name: location ? `${name} — ${location}` : name,
+        organizationId: session.user.organizationId,
+      },
+    });
 
-  const year = new Date().getFullYear();
-  await prisma.cycle.create({
-    data: { name: `Ciclo ${year}.1`, installationId: installation.id },
+    const year = new Date().getFullYear();
+    await tx.cycle.create({
+      data: { name: `Ciclo ${year}.1`, installationId: created.id },
+    });
+
+    return created;
   });
 
   revalidatePath("/instalacoes");
@@ -38,38 +41,39 @@ export async function deleteInstallation(installationId: string) {
     throw new Error("Apenas administradores da organização podem remover instalações.");
   }
 
-  const installation = await prisma.installation.findUnique({ where: { id: installationId } });
-  if (!installation || installation.organizationId !== session.user.organizationId) {
-    notFound();
-  }
+  await withOrgContext(session.user.organizationId, async (tx) => {
+    const installation = await tx.installation.findUnique({ where: { id: installationId } });
+    if (!installation || installation.organizationId !== session.user.organizationId) {
+      notFound();
+    }
 
-  const assessmentIds = (
-    await prisma.assessment.findMany({
-      where: { installationId },
-      select: { id: true },
-    })
-  ).map((a) => a.id);
+    const assessmentIds = (
+      await tx.assessment.findMany({
+        where: { installationId },
+        select: { id: true },
+      })
+    ).map((a) => a.id);
 
-  const actionIds = (
-    await prisma.action.findMany({
-      where: { assessmentId: { in: assessmentIds } },
-      select: { id: true },
-    })
-  ).map((a) => a.id);
+    const actionIds = (
+      await tx.action.findMany({
+        where: { assessmentId: { in: assessmentIds } },
+        select: { id: true },
+      })
+    ).map((a) => a.id);
 
-  await prisma.$transaction([
-    prisma.actionComment.deleteMany({ where: { actionId: { in: actionIds } } }),
-    prisma.actionLog.deleteMany({ where: { actionId: { in: actionIds } } }),
-    prisma.comment.deleteMany({ where: { assessmentId: { in: assessmentIds } } }),
-    prisma.assessmentRevision.deleteMany({ where: { assessmentId: { in: assessmentIds } } }),
-    prisma.auditLog.deleteMany({ where: { assessmentId: { in: assessmentIds } } }),
-    prisma.action.deleteMany({ where: { assessmentId: { in: assessmentIds } } }),
-    prisma.evidence.deleteMany({ where: { document: { installationId } } }),
-    prisma.assessment.deleteMany({ where: { installationId } }),
-    prisma.documentFile.deleteMany({ where: { installationId } }),
-    prisma.cycle.deleteMany({ where: { installationId } }),
-    prisma.installation.delete({ where: { id: installationId } }),
-  ]);
+    await tx.actionComment.deleteMany({ where: { actionId: { in: actionIds } } });
+    await tx.actionLog.deleteMany({ where: { actionId: { in: actionIds } } });
+    await tx.comment.deleteMany({ where: { assessmentId: { in: assessmentIds } } });
+    await tx.assessmentRevision.deleteMany({ where: { assessmentId: { in: assessmentIds } } });
+    await tx.auditLog.deleteMany({ where: { assessmentId: { in: assessmentIds } } });
+    await tx.action.deleteMany({ where: { assessmentId: { in: assessmentIds } } });
+    await tx.evidence.deleteMany({ where: { document: { installationId } } });
+    await tx.assessment.deleteMany({ where: { installationId } });
+    await tx.externalAnalysis.deleteMany({ where: { installationId } });
+    await tx.documentFile.deleteMany({ where: { installationId } });
+    await tx.cycle.deleteMany({ where: { installationId } });
+    await tx.installation.delete({ where: { id: installationId } });
+  });
 
   revalidatePath("/instalacoes");
 }

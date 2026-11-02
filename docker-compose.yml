@@ -1,0 +1,22 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: gistm-compass-db
+    restart: unless-stopped
+    ports:
+      # 5433 no host evita conflito com Postgres local já escutando em 5432
+      - "5433:5432"
+    environment:
+      POSTGRES_USER: gistm
+      POSTGRES_PASSWORD: gistm
+      POSTGRES_DB: gistm_compass
+    volumes:
+      - gistm_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gistm -d gistm_compass"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  gistm_pgdata:

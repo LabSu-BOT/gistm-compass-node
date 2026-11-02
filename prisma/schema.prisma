@@ -3,9 +3,7 @@ generator client {
 }
 
 datasource db {
-  // SQLite para desenvolvimento local. Para produção, trocar para "postgresql"
-  // e apontar DATABASE_URL para a instância Postgres.
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
@@ -84,6 +82,8 @@ model User {
   failedLoginAttempts Int          @default(0)
   lockedUntil         DateTime?
   createdAt           DateTime     @default(now())
+
+  @@index([organizationId])
 }
 
 // ---------------------------------------------------------------------------
@@ -101,6 +101,8 @@ model Installation {
   assessments      Assessment[]
   cycles           Cycle[]
   externalAnalyses ExternalAnalysis[]
+
+  @@index([organizationId])
 }
 
 model Cycle {
@@ -112,6 +114,8 @@ model Cycle {
   closedAt       DateTime?
 
   assessments Assessment[]
+
+  @@index([installationId])
 }
 
 // ---------------------------------------------------------------------------
@@ -147,6 +151,8 @@ model DocumentFile {
   nextVersions      DocumentFile[] @relation("DocumentVersionChain")
 
   evidences Evidence[]
+
+  @@index([installationId])
 }
 
 model Evidence {
@@ -158,6 +164,9 @@ model Evidence {
   excerpt       String
   aiGenerated   Boolean  @default(true)
   createdAt     DateTime @default(now())
+
+  @@index([documentId])
+  @@index([requirementId])
 }
 
 // ---------------------------------------------------------------------------
@@ -233,6 +242,8 @@ model Assessment {
   revisions AssessmentRevision[]
 
   @@unique([requirementId, installationId, cycleId])
+  @@index([installationId])
+  @@index([installationId, cycleId])
 }
 
 // Comentários/discussão por requisito (item 12 da proposta) — um mural de
@@ -363,6 +374,7 @@ model ExternalAnalysis {
   updatedAt      DateTime     @updatedAt
 
   @@unique([installationId, requirementId, source])
+  @@index([installationId])
 }
 
 // ---------------------------------------------------------------------------

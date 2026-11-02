@@ -2,8 +2,8 @@ import Link from "next/link";
 import { format } from "date-fns";
 import { redirect } from "next/navigation";
 import { ArrowLeft, UserPlus, Trash2, ShieldCheck, Lock, KeyRound } from "lucide-react";
-import { prisma } from "@/lib/prisma";
 import { auth } from "@/auth";
+import { withOrgContext } from "@/lib/tenant-db";
 import { Card, CardHeader, EmptyState } from "@/components/ui";
 import { createOrgUser, removeOrgUser, resetUserPassword } from "./actions";
 
@@ -14,12 +14,15 @@ export default async function OrganizationUsersPage() {
   if (!session?.user) redirect("/login");
   if (session.user.role !== "ADMIN") redirect("/instalacoes");
 
-  const organization = await prisma.organization.findUniqueOrThrow({
-    where: { id: session.user.organizationId },
-  });
-  const users = await prisma.user.findMany({
-    where: { organizationId: session.user.organizationId },
-    orderBy: { createdAt: "asc" },
+  const { organization, users } = await withOrgContext(session.user.organizationId, async (tx) => {
+    const organization = await tx.organization.findUniqueOrThrow({
+      where: { id: session.user.organizationId },
+    });
+    const users = await tx.user.findMany({
+      where: { organizationId: session.user.organizationId },
+      orderBy: { createdAt: "asc" },
+    });
+    return { organization, users };
   });
 
   return (
