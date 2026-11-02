@@ -53,7 +53,7 @@ técnico; a IA acelera a leitura, não substitui o julgamento.
 
 ## Executando localmente
 
-Pré-requisitos: Node.js 20+ e Docker.
+Pré-requisitos: Node.js 20.9+ (24 LTS ok no Azure App Service) e Docker.
 
 ```bash
 npm install

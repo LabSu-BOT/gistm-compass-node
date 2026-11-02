@@ -1,7 +1,7 @@
 # GISTM Compass — como rodar (desenvolvimento)
 
 ## Pré-requisitos
-- Node.js 20+
+- Node.js 20.9+ (24 LTS ok)
 - Docker (Postgres local via `docker compose`)
 
 ## Passos
