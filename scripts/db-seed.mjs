@@ -1,4 +1,7 @@
 import { spawnSync } from "node:child_process";
+import { loadEnvFile } from "./load-env.mjs";
+
+loadEnvFile();
 
 // Seed usa o role admin (bypass natural de superuser + set_config de segurança).
 const adminUrl = process.env.DATABASE_ADMIN_URL || process.env.DATABASE_URL;

@@ -10,7 +10,7 @@
 2. Suba o banco:
        docker compose up -d
 3. Copie `.env.example` para `.env` e preencha (principalmente `AUTH_SECRET` e, se for usar IA, `ANTHROPIC_API_KEY`).
-   - `DATABASE_URL` → role `gistm_app` em `127.0.0.1:5433` (sujeito a RLS).
+   - `DATABASE_URL` → role `gistm_app` em `127.0.0.1:5434` (sujeito a RLS).
    - `DATABASE_ADMIN_URL` → role `gistm` (migrations/seed).
    - `ALLOW_PUBLIC_SIGNUP=true` libera `/cadastro` no dev; em produção use `false`.
    - `STORAGE_DRIVER=local` grava em `uploads/`; em produção use `s3` + variáveis `S3_*`.

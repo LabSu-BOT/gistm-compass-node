@@ -45,7 +45,7 @@ técnico; a IA acelera a leitura, não substitui o julgamento.
 
 - **Next.js 16** (App Router) + **TypeScript** + **Tailwind CSS** — front-end e
   back-end no mesmo projeto, com Server Actions nas mutações.
-- **Prisma** + **PostgreSQL** (Docker local na porta `5433`; VPS em produção).
+- **Prisma** + **PostgreSQL** (Docker local na porta `5434`; VPS em produção).
 - **NextAuth (Auth.js v5)** — autenticação por credenciais e multi-tenant.
 - **Storage** — pasta `uploads/` em dev (`STORAGE_DRIVER=local`) ou S3-compatível
   em produção (`STORAGE_DRIVER=s3`, ex. Azure Blob).

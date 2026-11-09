@@ -1,6 +1,5 @@
 import mammoth from "mammoth";
 import ExcelJS from "exceljs";
-import { PDFParse } from "pdf-parse";
 
 const TEXT_EXTENSIONS = new Set([".txt", ".md"]);
 // 200k caracteres cobre a esmagadora maioria dos relatórios técnicos reais
@@ -55,7 +54,12 @@ export async function extractText(buffer: Buffer, ext: string): Promise<string |
     }
 
     if (normalizedExt === ".pdf") {
-      const parser = new PDFParse({ data: buffer });
+      // Import dinâmico: pdf-parse/pdfjs tocam DOMMatrix no load do módulo.
+      // Carregar só no ramo PDF evita derrubar a listagem de documentos.
+      // CanvasFactory (pdf-parse/worker + @napi-rs/canvas) polyfilla o Node.
+      const { CanvasFactory } = await import("pdf-parse/worker");
+      const { PDFParse } = await import("pdf-parse");
+      const parser = new PDFParse({ data: buffer, CanvasFactory });
       try {
         const result = await parser.getText();
         const text = result.text.trim();
