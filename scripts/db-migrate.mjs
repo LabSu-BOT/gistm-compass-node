@@ -1,4 +1,7 @@
 import { spawnSync } from "node:child_process";
+import { loadEnvFile } from "./load-env.mjs";
+
+loadEnvFile();
 
 // Migrations precisam do role dono/superuser; a app usa gistm_app (sem bypass RLS).
 const adminUrl = process.env.DATABASE_ADMIN_URL || process.env.DATABASE_URL;

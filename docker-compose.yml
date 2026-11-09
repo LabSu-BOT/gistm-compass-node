@@ -4,8 +4,8 @@ services:
     container_name: gistm-compass-db
     restart: unless-stopped
     ports:
-      # 5433 no host evita conflito com Postgres local já escutando em 5432
-      - "5433:5432"
+      # 5434 no host: 5432/5433 costumam estar ocupados (Postgres local / e-SUS)
+      - "5434:5432"
     environment:
       POSTGRES_USER: gistm
       POSTGRES_PASSWORD: gistm

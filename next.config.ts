@@ -1,11 +1,19 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  // pdf-parse usa pdfjs-dist por baixo, que tenta carregar um worker
-  // (pdf.worker.mjs) em tempo de execução — o bundler do Next.js não resolve
-  // esse arquivo dentro do chunk do servidor, então o pacote precisa ficar de
-  // fora do bundle e ser carregado via require nativo do Node.
-  serverExternalPackages: ["pdf-parse"],
+  // Imagem Docker / Lightsail: só o necessário para `node server.js`.
+  output: "standalone",
+  // pdf-parse/pdfjs + canvas nativo: fora do bundle; tracing inclui binários
+  // Linux para o standalone Docker (Lightsail).
+  serverExternalPackages: ["pdf-parse", "@napi-rs/canvas"],
+  outputFileTracingIncludes: {
+    "/**": [
+      "./node_modules/pdf-parse/**/*",
+      "./node_modules/pdfjs-dist/**/*",
+      "./node_modules/@napi-rs/canvas/**/*",
+      "./node_modules/@napi-rs/canvas-linux-x64-gnu/**/*",
+    ],
+  },
   experimental: {
     // Importação de pasta inteira (múltiplos documentos de uma vez) pode
     // facilmente passar do limite padrão de 1MB por requisição de Server Action.
