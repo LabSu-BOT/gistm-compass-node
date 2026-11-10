@@ -5,6 +5,24 @@ import { prisma } from "@/lib/prisma";
 import { assertInstallationOwnership } from "@/lib/context";
 import { auth } from "@/auth";
 import type { ActionPriority, ActionStatus } from "@prisma/client";
+import { flash } from "@/lib/flash";
+import { saveDocumentFile } from "@/lib/document-upload";
+
+/** Próximo código sequencial da estrutura: PA-001, PA-002… (item 16). */
+async function nextActionCode(installationId: string): Promise<string> {
+  const existing = await prisma.action.findMany({
+    where: { assessment: { installationId }, code: { not: null } },
+    select: { code: true },
+  });
+  const max = existing.reduce((m, a) => {
+    const n = Number(String(a.code).replace(/\D/g, ""));
+    return Number.isFinite(n) && n > m ? n : m;
+  }, 0);
+  const total = await prisma.action.count({ where: { assessment: { installationId } } });
+  // Ações antigas (sem código) também contam, para os números não colidirem
+  // com o código calculado que a tela mostra para elas.
+  return `PA-${String(Math.max(max, total) + 1).padStart(3, "0")}`;
+}
 
 function revalidateAction(installationId: string, requirementId?: string) {
   revalidatePath(`/instalacoes/${installationId}/planos-de-acao`);
@@ -50,6 +68,7 @@ export async function createAction(formData: FormData) {
 
   const action = await prisma.action.create({
     data: {
+      code: await nextActionCode(installationId),
       assessmentId,
       description,
       responsible,
@@ -79,6 +98,7 @@ export async function createAction(formData: FormData) {
   });
 
   revalidateAction(installationId, requirementId || undefined);
+  await flash(`Ação ${action.code} criada.`);
 }
 
 export async function updateActionStatus(
@@ -90,12 +110,15 @@ export async function updateActionStatus(
   if (!session?.user) throw new Error("Sessão expirada. Faça login novamente.");
 
   const closureEvidence = String(formData.get("closureEvidence") ?? "").trim();
+  const closureLink = String(formData.get("closureLink") ?? "").trim();
+  const closureDocumentIdRaw = String(formData.get("closureDocumentId") ?? "").trim();
+  const closureFile = formData.get("closureFile");
 
   const current = await prisma.action.findUniqueOrThrow({
     where: { id: actionId },
     include: {
       dependsOn: { select: { status: true, description: true } },
-      assessment: { select: { installation: { select: { organizationId: true } } } },
+      assessment: { select: { installationId: true, installation: { select: { organizationId: true } } } },
     },
   });
   if (current.assessment.installation.organizationId !== session.user.organizationId) {
@@ -111,8 +134,31 @@ export async function updateActionStatus(
       `Esta ação depende de "${current.dependsOn.description}", que ainda não foi concluída.`
     );
   }
-  if (status === "CONCLUIDA" && !closureEvidence) {
-    throw new Error("Informe a evidência de encerramento para concluir a ação.");
+  // Evidência de encerramento (item 19): documento (anexado agora ou já na
+  // Documentação) + link. A observação em texto passa a ser opcional.
+  let closureDocumentId: string | null = null;
+  if (status === "CONCLUIDA") {
+    if (!closureLink) {
+      throw new Error("Informe o link da evidência de encerramento para concluir a ação.");
+    }
+    if (!/^https?:\/\//i.test(closureLink)) {
+      throw new Error("O link da evidência deve começar com http:// ou https://.");
+    }
+    const installationId = current.assessment.installationId;
+    if (closureFile instanceof File && closureFile.size > 0) {
+      const doc = await saveDocumentFile(session.user.organizationId, installationId, closureFile, {
+        type: "Evidência de encerramento",
+      });
+      closureDocumentId = doc.id;
+    } else if (closureDocumentIdRaw) {
+      const doc = await prisma.documentFile.findUnique({ where: { id: closureDocumentIdRaw } });
+      if (!doc || doc.installationId !== installationId) {
+        throw new Error("Documento de evidência não encontrado nesta estrutura.");
+      }
+      closureDocumentId = doc.id;
+    } else {
+      throw new Error("Anexe um documento (ou escolha um da Documentação) como evidência de encerramento.");
+    }
   }
 
   const action = await prisma.action.update({
@@ -120,6 +166,8 @@ export async function updateActionStatus(
     data: {
       status,
       closureEvidence: status === "CONCLUIDA" ? closureEvidence || null : undefined,
+      closureDocumentId: status === "CONCLUIDA" ? closureDocumentId : undefined,
+      closureLink: status === "CONCLUIDA" ? closureLink : undefined,
     },
     include: { assessment: { select: { installationId: true, requirementId: true } } },
   });
@@ -131,11 +179,13 @@ export async function updateActionStatus(
       event: "STATUS_ALTERADO",
       note:
         `Status alterado de "${STATUS_LABELS[current.status]}" para "${STATUS_LABELS[status]}".` +
-        (status === "CONCLUIDA" && closureEvidence ? ` Evidência de encerramento: ${closureEvidence}` : ""),
+        (status === "CONCLUIDA" ? ` Evidência: ${closureLink}${closureEvidence ? ` — ${closureEvidence}` : ""}` : ""),
     },
   });
 
   revalidateAction(action.assessment.installationId, action.assessment.requirementId);
+  if (status === "CONCLUIDA") revalidatePath(`/instalacoes/${action.assessment.installationId}/documentos`);
+  await flash(status === "CONCLUIDA" ? "Ação concluída." : status === "EM_ANDAMENTO" ? "Ação iniciada." : "Status atualizado.");
 }
 
 export async function addActionComment(formData: FormData) {
@@ -167,6 +217,7 @@ export async function addActionComment(formData: FormData) {
   if (requirementId) {
     revalidatePath(`/instalacoes/${installationId}/requisitos/${requirementId}`);
   }
+  await flash("Comentário publicado.");
 }
 
 export async function deleteAction(actionId: string) {
@@ -189,4 +240,5 @@ export async function deleteAction(actionId: string) {
   });
 
   revalidateAction(action.assessment.installationId, action.assessment.requirementId);
+  await flash("Ação excluída.");
 }

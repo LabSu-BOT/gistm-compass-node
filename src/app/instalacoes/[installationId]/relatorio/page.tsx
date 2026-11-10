@@ -6,7 +6,9 @@ import { CycleSwitcher } from "@/components/CycleSwitcher";
 import { PrintButton } from "@/components/PrintButton";
 import { CompassWheel } from "@/components/CompassWheel";
 import { ReadinessGauge } from "@/components/ReadinessGauge";
-import { LangSwitcher } from "@/components/LangSwitcher";
+import { resolveLang } from "@/lib/lang";
+import { shortTitle } from "@/lib/short-titles";
+import { InfoTip } from "@/components/InfoTip";
 
 export const dynamic = "force-dynamic";
 
@@ -15,12 +17,12 @@ export default async function RelatorioPage({
   searchParams,
 }: {
   params: Promise<{ installationId: string }>;
-  searchParams: Promise<{ cycle?: string; nivel?: string; lang?: string }>;
+  searchParams: Promise<{ cycle?: string; nivel?: string; lang?: string; print?: string }>;
 }) {
   const { installationId } = await params;
-  const { cycle: cycleParam, nivel, lang: langParam } = await searchParams;
+  const { cycle: cycleParam, nivel, lang: langParam, print } = await searchParams;
   const completo = nivel !== "resumido";
-  const lang = langParam === "en" ? "en" : "pt";
+  const lang = await resolveLang(langParam);
   const report = await computeInstallationReport(installationId, cycleParam, lang);
   const { installation, cycle } = report;
 
@@ -39,26 +41,38 @@ export default async function RelatorioPage({
 
   return (
     <div className="print:bg-white">
-      <div className="mx-auto flex max-w-4xl items-center justify-between px-8 pt-6 print:hidden">
-        <div className="flex items-center gap-3">
-          <CycleSwitcher cycles={report.allCycles} currentCycleId={cycle.id} />
-          <div className="flex rounded-lg border border-mineral-300 p-0.5 text-xs">
-            <a
-              href={levelHref("resumido")}
-              className={`rounded-md px-3 py-1.5 font-medium ${!completo ? "bg-brand-800 text-white" : "text-mineral-600"}`}
-            >
-              Resumido
-            </a>
-            <a
-              href={levelHref("completo")}
-              className={`rounded-md px-3 py-1.5 font-medium ${completo ? "bg-brand-800 text-white" : "text-mineral-600"}`}
-            >
-              Completo
-            </a>
+      {/* Barra de geração do PDF (item 26): uma ação principal, bem visível. */}
+      <div className="mx-auto max-w-4xl px-8 pt-6 print:hidden">
+        <div className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-mineral-200/80 bg-white px-6 py-5 shadow-[var(--shadow-card)]">
+          <div>
+            <p className="flex items-center gap-1.5 text-lg font-semibold text-mineral-900">
+              Relatório de conformidade
+              <InfoTip label="Como salvar o PDF">
+                Ao clicar em &quot;Baixar PDF&quot;, a janela de impressão do navegador abre. Em
+                &quot;Destino&quot;, escolha &quot;Salvar como PDF&quot;. O relatório usa as mesmas
+                classificações do Sumário executivo.
+              </InfoTip>
+            </p>
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <div className="flex rounded-full border border-mineral-200 p-0.5 text-xs">
+                <a
+                  href={levelHref("resumido")}
+                  className={`rounded-full px-3 py-1 font-medium ${!completo ? "bg-brand-500 text-white" : "text-mineral-600"}`}
+                >
+                  Resumido
+                </a>
+                <a
+                  href={levelHref("completo")}
+                  className={`rounded-full px-3 py-1 font-medium ${completo ? "bg-brand-500 text-white" : "text-mineral-600"}`}
+                >
+                  Completo
+                </a>
+              </div>
+              <CycleSwitcher cycles={report.allCycles} currentCycleId={cycle.id} />
+            </div>
           </div>
-          <LangSwitcher lang={lang} extraParams={{ cycle: cycleParam, nivel }} />
+          <PrintButton autoPrint={print === "1"} />
         </div>
-        <PrintButton />
       </div>
 
       {/* Capa */}
@@ -192,7 +206,7 @@ export default async function RelatorioPage({
                 {report.topGaps.map((g) => (
                   <tr key={g.id}>
                     <td className="py-1.5 pr-3 font-mono text-xs text-mineral-500 print:text-black">{g.code}</td>
-                    <td className="py-1.5 pr-3 text-mineral-700 print:text-black">{g.title}</td>
+                    <td className="py-1.5 pr-3 text-mineral-700 print:text-black">{shortTitle(g.code, g.title, lang)}</td>
                     <td className="py-1.5 pr-3 text-mineral-700 print:text-black">
                       {classificationLabel(g.classification)}
                     </td>
@@ -225,7 +239,7 @@ export default async function RelatorioPage({
                 {report.gapsList.map((g) => (
                   <tr key={g.id}>
                     <td className="py-1.5 pr-3 font-mono text-xs text-mineral-500 print:text-black">{g.code}</td>
-                    <td className="py-1.5 pr-3 text-mineral-700 print:text-black">{g.title}</td>
+                    <td className="py-1.5 pr-3 text-mineral-700 print:text-black">{shortTitle(g.code, g.title, lang)}</td>
                     <td className="py-1.5 pr-3 text-mineral-700 print:text-black">
                       {classificationLabel(g.classification)}
                     </td>

@@ -6,14 +6,15 @@ import type {
   InfoSufficiency,
   Requirement,
 } from "@prisma/client";
+import { POST_FAILURE_ONLY } from "@/lib/assessment-rubric";
 
 /**
  * Simulador da camada de "leitura inteligente de evidências" descrita na
  * proposta GISTM Compass. Não chama nenhum modelo de IA real — produz uma
  * sugestão de classificação determinística e explicável a partir de uma
  * heurística de sobreposição de palavras-chave entre o requisito e os
- * documentos vinculados, combinada com uma variação pseudo-aleatória
- * determinística (mesma entrada → mesma saída).
+ * documentos com texto lido. É determinística e conservadora (régua em
+ * `assessment-rubric.ts`): nunca sugere "Atende" sozinha.
  *
  * A interface de saída (classificação, robustez, criticidade, justificativa,
  * confiança, trechos de evidência) é a mesma que uma integração real com a
@@ -38,15 +39,31 @@ export function tokenize(text: string): Set<string> {
   );
 }
 
-// Hash determinístico simples (djb2) para gerar uma variação pseudo-aleatória
-// estável a partir de uma string (mesmo requisito + mesmos documentos sempre
-// produz o mesmo resultado).
-function seededRandom(seed: string): number {
-  let hash = 5381;
-  for (let i = 0; i < seed.length; i++) {
-    hash = (hash * 33) ^ seed.charCodeAt(i);
+// Limiares da leitura por palavras-chave (fração dos termos do requisito
+// encontrados no melhor documento). Calibrados com uma base real de 178
+// documentos auditada por especialistas: a contagem de palavras não separa
+// bem "parcial" de "não atende" (o texto do requisito está em português e os
+// documentos costumam estar em inglês), então a heurística segue a régua —
+// havendo documento relacionado, sugere "Parcial"; "Não atende" só quando
+// quase nada do requisito aparece na base.
+const HEURISTIC_PARTIAL = 0.15;
+const HEURISTIC_WEAK = 0.04;
+
+/** Trecho de ~240 caracteres onde mais termos do requisito aparecem. */
+function bestExcerpt(text: string, tokens: Set<string>): string {
+  const flat = text.replace(/\s+/g, " ");
+  let best = 0;
+  let bestScore = -1;
+  for (let i = 0; i < Math.max(1, flat.length - 240); i += 120) {
+    let sc = 0;
+    for (const w of tokenize(flat.slice(i, i + 240))) if (tokens.has(w)) sc++;
+    if (sc > bestScore) {
+      bestScore = sc;
+      best = i;
+    }
   }
-  return ((hash >>> 0) % 10000) / 10000;
+  const piece = flat.slice(best, best + 240).trim();
+  return (best > 0 ? "…" : "") + piece + (best + 240 < flat.length ? "…" : "");
 }
 
 export function overlapScore(requirementTokens: Set<string>, documentText: string): number {
@@ -80,10 +97,27 @@ export function simulateAiReading(
   documents: Pick<DocumentFile, "id" | "title" | "extractedText">[]
 ): AiSuggestion {
   const requirementTokens = tokenize(`${requirement.title} ${requirement.description}`);
-  const seed = `${requirement.code}::${documents.map((d) => d.id).join(",")}`;
-  const noise = seededRandom(seed);
 
-  if (documents.length === 0) {
+  // Regra de aplicabilidade da régua: requisitos de recuperação pós-falha.
+  if (POST_FAILURE_ONLY.includes(requirement.code)) {
+    return {
+      classification: "NAO_SE_APLICA",
+      robustness: "AUSENTE",
+      criticality: "NAO_SE_APLICA",
+      infoSufficiency: "SUFICIENTE",
+      confidence: 0.9,
+      justification:
+        "Requisito de recuperação pós-falha: só se aplica depois de uma falha catastrófica. " +
+        "Confirme na validação se não houve falha.",
+      evidences: [],
+    };
+  }
+
+  // Só documentos com texto lido contam: um PDF escaneado sem texto não pode
+  // ser citado como evidência (antes o título entrava no lugar do conteúdo).
+  const readable = documents.filter((d) => (d.extractedText ?? "").trim().length > 0);
+
+  if (readable.length === 0) {
     return {
       classification: "NAO_ATENDE",
       robustness: "AUSENTE",
@@ -91,38 +125,28 @@ export function simulateAiReading(
       infoSufficiency: "INSUFICIENTE",
       confidence: 0.3,
       justification:
-        "Nenhum documento foi vinculado a este requisito na base documental. " +
-        "A leitura inteligente não localizou evidências de suporte. Sugestão: " +
-        "\"Não atende\", com criticidade alta, até que documentação seja anexada e revisada por um especialista.",
+        "Nenhum documento com texto legível na base documental. " +
+        "Sugestão: \"Não atende\" até que a documentação seja anexada e revisada por um especialista.",
       evidences: [],
     };
   }
 
-  const scored = documents.map((doc) => {
-    const text = doc.extractedText ?? doc.title;
-    const score = overlapScore(requirementTokens, text);
-    return { doc, score };
-  });
+  const scored = readable.map((doc) => ({ doc, score: overlapScore(requirementTokens, doc.extractedText!) }));
 
-  const bestScore = Math.max(...scored.map((s) => s.score));
-  // Combina a sobreposição textual real com a variação determinística, e dá
-  // um bônus por haver múltiplos documentos vinculados (mais contexto).
-  const multiDocBonus = Math.min(0.15, (documents.length - 1) * 0.05);
-  const combined = Math.min(1, bestScore * 0.55 + noise * 0.35 + multiDocBonus);
+  // Leitura por palavras-chave, sem componente aleatório. Com a régua de
+  // rigor, ela nunca sugere "Atende": isso exige confirmar aprovação formal
+  // e aplicação na prática, o que só a leitura do documento (IA ou revisor) faz.
+  const combined = Math.max(...scored.map((s) => s.score));
 
   let classification: FinalClassification;
   let robustness: EvidenceRobustness;
   let criticality: GapCriticality;
 
-  if (combined >= 0.72) {
-    classification = "ATENDE_TOTALMENTE";
-    robustness = "ROBUSTA";
-    criticality = "NAO_SE_APLICA";
-  } else if (combined >= 0.48) {
+  if (combined >= HEURISTIC_PARTIAL) {
     classification = "ATENDE_PARCIALMENTE";
     robustness = "PARCIAL";
     criticality = "MEDIA";
-  } else if (combined >= 0.25) {
+  } else if (combined >= HEURISTIC_WEAK) {
     classification = "ATENDE_PARCIALMENTE";
     robustness = "FRACA";
     criticality = "ALTA";
@@ -149,18 +173,16 @@ export function simulateAiReading(
 
   const percentText = Math.round(combined * 100);
   const justification =
-    `A leitura automatizada (simulada) buscou correspondência textual entre este requisito e ` +
-    `os ${documents.length} documento(s) da base documental desta instalação. Os mais ` +
+    `A leitura automática por palavras-chave comparou este requisito com os ` +
+    `${readable.length} documento(s) com texto da base documental. Os mais ` +
     `relevantes encontrados foram: ${relevantDocsText}. A aderência textual estimada foi de ` +
     `${percentText}%. Classificação sugerida: "${classificationLabel(classification)}", com ` +
     `robustez de evidência "${robustnessLabel(robustness)}". Esta sugestão deve ser ` +
     `confirmada, ajustada ou rejeitada por um revisor técnico antes da validação final.`;
 
-  const evidences: AiEvidenceSuggestion[] = ranked.slice(0, 3).map(({ doc }) => ({
+  const evidences: AiEvidenceSuggestion[] = topMatches.map(({ doc }) => ({
     documentId: doc.id,
-    excerpt: doc.extractedText
-      ? doc.extractedText.slice(0, 240).trim() + (doc.extractedText.length > 240 ? "…" : "")
-      : `[Trecho ilustrativo] Documento "${doc.title}" relacionado ao requisito ${requirement.code}.`,
+    excerpt: bestExcerpt(doc.extractedText!, requirementTokens),
   }));
 
   return {

@@ -1,4 +1,5 @@
 import { addDays, isBefore } from "date-fns";
+import { shortPrinciple } from "@/lib/short-titles";
 import { prisma } from "@/lib/prisma";
 import { getInstallationContext } from "@/lib/context";
 import { STATUS_COLORS, type DistributionSegment, type RankedBarItem } from "@/components/charts";
@@ -14,6 +15,8 @@ export interface GapItem {
   classification: FinalClassification;
   robustness: EvidenceRobustness | null;
   criticality: GapCriticality | null;
+  /** true = classificação sugerida pela IA, ainda não validada (item 25). */
+  preliminary?: boolean;
 }
 
 export interface WheelTheme {
@@ -52,7 +55,11 @@ export async function computeInstallationReport(
         where: { assessment: { installationId: installation.id, cycleId: cycle.id } },
       }),
       prisma.documentFile.count({ where: { installationId: installation.id } }),
-      prisma.documentFile.findMany({ where: { installationId: installation.id } }),
+      // Uma consulta só para documentos (antes eram duas iguais, item 3).
+      prisma.documentFile.findMany({
+        where: { installationId: installation.id },
+        include: { nextVersions: { select: { uploadedAt: true } } },
+      }),
     ]);
 
   const pick = (pt: string, en: string | null | undefined) => (lang === "en" ? en ?? pt : pt);
@@ -60,13 +67,27 @@ export async function computeInstallationReport(
   const validated = assessments.filter((a) => a.status === "VALIDADO");
   const pendingReview = totalRequirements - validated.length;
 
-  const countBy = (cls: string) => validated.filter((a) => a.finalClassification === cls).length;
+  // Item 25: o painel passa a considerar também as sugestões da IA ainda não
+  // validadas. Para cada requisito vale a decisão humana, se existir; senão,
+  // a sugestão da IA. As contagens de "validados" continuam só humanas.
+  const effective = assessments.flatMap((a) => {
+    if (a.status === "VALIDADO" && a.finalClassification) {
+      return [{ ...a, effCls: a.finalClassification, effCrit: a.finalCriticality, effRob: a.finalRobustness, isValidated: true }];
+    }
+    if (a.aiClassification) {
+      return [{ ...a, effCls: a.aiClassification, effCrit: a.aiCriticality, effRob: a.aiRobustness, isValidated: false }];
+    }
+    return [];
+  });
+  const aiOnlyCount = effective.filter((a) => !a.isValidated).length;
+
+  const countBy = (cls: string) => effective.filter((a) => a.effCls === cls).length;
   const totalmente = countBy("ATENDE_TOTALMENTE");
   const parcialmente = countBy("ATENDE_PARCIALMENTE");
   const naoAtende = countBy("NAO_ATENDE");
   const naoSeAplica = countBy("NAO_SE_APLICA");
 
-  const applicable = validated.length - naoSeAplica;
+  const applicable = effective.length - naoSeAplica;
   const overallCompliance = applicable > 0 ? Math.round((totalmente / applicable) * 100) : null;
 
   const distributionSegments: DistributionSegment[] = [
@@ -78,9 +99,9 @@ export async function computeInstallationReport(
 
   const principleBars: RankedBarItem[] = principles.map((p) => {
     const reqIds = new Set(p.themes.flatMap((t) => t.requirements.map((r) => r.id)));
-    const pAssessments = validated.filter((a) => reqIds.has(a.requirementId));
-    const pApplicable = pAssessments.filter((a) => a.finalClassification !== "NAO_SE_APLICA");
-    const pCompliant = pAssessments.filter((a) => a.finalClassification === "ATENDE_TOTALMENTE");
+    const pAssessments = effective.filter((a) => reqIds.has(a.requirementId));
+    const pApplicable = pAssessments.filter((a) => a.effCls !== "NAO_SE_APLICA");
+    const pCompliant = pAssessments.filter((a) => a.effCls === "ATENDE_TOTALMENTE");
     const pct = pApplicable.length ? (pCompliant.length / pApplicable.length) * 100 : 0;
     return { key: p.id, label: `${p.number}. ${pick(p.name, p.nameEn)}`, value: pct };
   });
@@ -89,14 +110,14 @@ export async function computeInstallationReport(
     .flatMap((p) => p.themes)
     .map((t) => {
       const reqIds = new Set(t.requirements.map((r) => r.id));
-      const tAssessments = validated.filter((a) => reqIds.has(a.requirementId));
-      const tApplicable = tAssessments.filter((a) => a.finalClassification !== "NAO_SE_APLICA");
-      const tCompliant = tAssessments.filter((a) => a.finalClassification === "ATENDE_TOTALMENTE");
+      const tAssessments = effective.filter((a) => reqIds.has(a.requirementId));
+      const tApplicable = tAssessments.filter((a) => a.effCls !== "NAO_SE_APLICA");
+      const tCompliant = tAssessments.filter((a) => a.effCls === "ATENDE_TOTALMENTE");
       const pct = tApplicable.length ? (tCompliant.length / tApplicable.length) * 100 : 0;
       const hasData = tAssessments.length > 0;
       return {
         key: t.id,
-        label: `${t.number}. ${pick(t.name, t.nameEn)}`,
+        label: `${t.number}. ${shortPrinciple(t.number, pick(t.name, t.nameEn), lang)}`,
         value: pct,
         badge: maturityLabel(pct, hasData),
         badgeColor: complianceColor(hasData ? pct : null),
@@ -109,9 +130,9 @@ export async function computeInstallationReport(
   const wheelThemes: WheelTheme[] = principles.flatMap((p) =>
     p.themes.map((t) => {
       const reqIds = new Set(t.requirements.map((r) => r.id));
-      const tValidated = validated.filter((a) => reqIds.has(a.requirementId));
-      const tApplicable = tValidated.filter((a) => a.finalClassification !== "NAO_SE_APLICA");
-      const tCompliant = tValidated.filter((a) => a.finalClassification === "ATENDE_TOTALMENTE");
+      const tValidated = effective.filter((a) => reqIds.has(a.requirementId));
+      const tApplicable = tValidated.filter((a) => a.effCls !== "NAO_SE_APLICA");
+      const tCompliant = tValidated.filter((a) => a.effCls === "ATENDE_TOTALMENTE");
       const pct = tApplicable.length ? (tCompliant.length / tApplicable.length) * 100 : 0;
       return {
         id: t.id,
@@ -127,29 +148,30 @@ export async function computeInstallationReport(
   );
 
   const criticalityCounts = {
-    alta: validated.filter((a) => a.finalCriticality === "ALTA").length,
-    media: validated.filter((a) => a.finalCriticality === "MEDIA").length,
-    baixa: validated.filter((a) => a.finalCriticality === "BAIXA").length,
+    alta: effective.filter((a) => a.effCrit === "ALTA").length,
+    media: effective.filter((a) => a.effCrit === "MEDIA").length,
+    baixa: effective.filter((a) => a.effCrit === "BAIXA").length,
   };
 
-  const gapAssessments = validated.filter(
-    (a) => a.finalClassification === "ATENDE_PARCIALMENTE" || a.finalClassification === "NAO_ATENDE"
+  const gapAssessments = effective.filter(
+    (a) => a.effCls === "ATENDE_PARCIALMENTE" || a.effCls === "NAO_ATENDE"
   );
   const criticalityRank: Record<string, number> = { ALTA: 0, MEDIA: 1, BAIXA: 2, NAO_SE_APLICA: 3 };
   const gapsList: GapItem[] = gapAssessments
     .slice()
     .sort(
       (a, b) =>
-        (criticalityRank[a.finalCriticality ?? "NAO_SE_APLICA"] ?? 9) -
-        (criticalityRank[b.finalCriticality ?? "NAO_SE_APLICA"] ?? 9)
+        (criticalityRank[a.effCrit ?? "NAO_SE_APLICA"] ?? 9) -
+        (criticalityRank[b.effCrit ?? "NAO_SE_APLICA"] ?? 9)
     )
     .map((a) => ({
       id: a.requirementId,
       code: a.requirement.code,
       title: pick(a.requirement.title, a.requirement.titleEn),
-      classification: a.finalClassification!,
-      robustness: a.finalRobustness,
-      criticality: a.finalCriticality,
+      classification: a.effCls,
+      robustness: a.effRob,
+      criticality: a.effCrit,
+      preliminary: !a.isValidated,
     }));
   const topGaps = gapsList.slice(0, 8);
 
@@ -182,10 +204,7 @@ export async function computeInstallationReport(
   // Alerta de revalidação (item 9.9 da proposta): quando um documento usado
   // como evidência de uma avaliação já validada é substituído por uma versão
   // mais nova, a avaliação pode estar baseada em conteúdo desatualizado.
-  const documentsWithVersions = await prisma.documentFile.findMany({
-    where: { installationId: installation.id },
-    include: { nextVersions: { select: { uploadedAt: true } } },
-  });
+  const documentsWithVersions = allDocuments;
   const newestVersionDateByDocId = new Map<string, Date>();
   for (const doc of documentsWithVersions) {
     if (doc.nextVersions.length > 0) {
@@ -251,11 +270,23 @@ export async function computeInstallationReport(
     };
   }
 
+  const validatedNsa = validated.filter((a) => a.finalClassification === "NAO_SE_APLICA").length;
+  const validatedApplicable = validated.length - validatedNsa;
+  const validatedCompliance =
+    validatedApplicable > 0
+      ? Math.round(
+          (validated.filter((a) => a.finalClassification === "ATENDE_TOTALMENTE").length / validatedApplicable) * 100
+        )
+      : null;
+
   const readinessScore = computeReadinessScore({
     validatedCount: validated.length,
     totalRequirements,
-    overallCompliance,
-    criticalGaps: criticalityCounts.alta,
+    // O índice continua 100% baseado em decisões humanas: cobertura,
+    // atendimento e gaps altos contam só o que foi validado (item 25 muda a
+    // exibição do painel, não a nota).
+    overallCompliance: validatedCompliance,
+    criticalGaps: validated.filter((a) => a.finalCriticality === "ALTA").length,
     overdueActions: overdueActions.length,
     expiredDocuments: expiredDocuments.length,
     pendingAiReview: pendingAiReview.length,
@@ -264,7 +295,7 @@ export async function computeInstallationReport(
   const executiveSummary = buildExecutiveSummary({
     installationName: installation.name,
     cycleName: cycle.name,
-    validatedCount: validated.length,
+    validatedCount: effective.length,
     totalRequirements,
     overallCompliance,
     totalmente,
@@ -282,6 +313,10 @@ export async function computeInstallationReport(
     isLatestCycle,
     totalRequirements,
     validatedCount: validated.length,
+    /** Requisitos com classificação (validada ou sugerida pela IA). */
+    analyzedCount: effective.length,
+    /** Requisitos cuja classificação no painel ainda é só sugestão da IA. */
+    aiOnlyCount,
     pendingReview,
     totalmente,
     parcialmente,
@@ -370,4 +405,10 @@ function buildExecutiveSummary(input: {
   }
 
   return parts.join(" ");
+}
+
+/** Nota curta para quando o painel inclui sugestões da IA não validadas. */
+export function preliminaryNote(aiOnlyCount: number): string | null {
+  if (aiOnlyCount === 0) return null;
+  return `${aiOnlyCount} classificação(ões) ainda são sugestões da IA, pendentes de validação.`;
 }

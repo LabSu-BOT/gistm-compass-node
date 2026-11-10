@@ -8,42 +8,42 @@ import type {
 } from "@prisma/client";
 
 /**
- * Cabeçalho de página. Fica grudado no topo da viewport (`sticky`) porque as
- * páginas de dashboard passam de 3000px de altura — sem isso, o seletor de
- * ciclo, o PT/EN e o botão "Continuar avaliação" somem assim que o usuário
- * rola a primeira dobra. Em impressão volta a ser estático.
+ * Cabeçalho de página. Não é mais fixo no topo: quem fica fixo agora é o menu
+ * horizontal (TopNav). Título grande, descrição em uma linha e, à direita, a
+ * ação principal da tela.
  */
 export function PageHeader({
   title,
   description,
   action,
   toolbar,
+  info,
 }: {
   title: string;
   description?: string;
   action?: ReactNode;
-  /** Barra de filtros/abas. Fica dentro do mesmo bloco fixo do título —
-   *  numa lista de 77 itens, um filtro que some ao rolar é inútil. */
+  /** Barra de filtros/abas logo abaixo do título. */
   toolbar?: ReactNode;
+  /** Explicação longa escondida atrás de um ícone "i" ao lado do título. */
+  info?: ReactNode;
 }) {
   return (
-    <div className="sticky top-0 z-30 border-b border-mineral-200 bg-white/95 backdrop-blur-sm print:static print:bg-white">
-      <div className="content-shell flex flex-wrap items-start justify-between gap-x-4 gap-y-3 pt-5 pb-4">
+    <div className="print:bg-white">
+      <div className="content-shell flex flex-wrap items-end justify-between gap-x-4 gap-y-3 pt-7 pb-4">
         <div className="min-w-0">
-          <h1 className="text-mineral-900" style={{ fontSize: "var(--text-page)" }}>
+          <h1 className="flex items-center gap-2 text-mineral-900" style={{ fontSize: "1.75rem" }}>
             {title}
+            {info}
           </h1>
           {description && (
-            <p className="mt-1 max-w-2xl text-mineral-600" style={{ fontSize: "var(--text-small)" }}>
+            <p className="mt-1 max-w-2xl truncate text-mineral-500" style={{ fontSize: "var(--text-small)" }}>
               {description}
             </p>
           )}
         </div>
         {action && <div className="shrink-0">{action}</div>}
       </div>
-      {toolbar && (
-        <div className="content-shell border-t border-mineral-100 py-2.5">{toolbar}</div>
-      )}
+      {toolbar && <div className="content-shell pb-2">{toolbar}</div>}
     </div>
   );
 }
@@ -61,7 +61,7 @@ export function PageBody({
   className?: string;
 }) {
   return (
-    <div className={clsx("content-shell py-6 lg:py-8", className)}>{children}</div>
+    <div className={clsx("content-shell pt-2 pb-10", className)}>{children}</div>
   );
 }
 
@@ -86,7 +86,7 @@ export function Card({
   return (
     <div
       className={clsx(
-        "rounded-xl border border-mineral-200 bg-white shadow-sm",
+        "rounded-2xl border border-mineral-200/80 bg-white shadow-[var(--shadow-card)]",
         className
       )}
     >
@@ -242,11 +242,14 @@ export function StatTile({
   value,
   hint,
   tone = "default",
+  info,
 }: {
   label: string;
   value: string;
   hint?: string;
   tone?: "default" | "good" | "warning" | "critical";
+  /** Explicação escondida atrás do ícone "i". */
+  info?: ReactNode;
 }) {
   const toneColor = {
     default: "text-mineral-900",
@@ -257,11 +260,29 @@ export function StatTile({
 
   return (
     <Card className="px-5 py-4">
-      <p className="text-xs font-medium text-mineral-500">{label}</p>
-      <p className={clsx("mt-1 text-2xl font-semibold tabular-nums", toneColor)}>
+      <p className="flex items-center gap-1 text-xs font-medium text-mineral-500">
+        {label}
+        {info}
+      </p>
+      <p
+        className={clsx("mt-1 font-display font-semibold tabular-nums leading-none", toneColor)}
+        style={{ fontSize: "2.25rem" }}
+      >
         {value}
       </p>
-      {hint && <p className="mt-1 text-xs text-mineral-500">{hint}</p>}
+      {hint && <p className="mt-2 truncate text-xs text-mineral-500">{hint}</p>}
     </Card>
+  );
+}
+
+/** Selo "IA" para classificações sugeridas e ainda não validadas por uma pessoa. */
+export function AiPendingTag() {
+  return (
+    <span
+      className="inline-flex items-center rounded-full border border-dashed border-brand-300 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-brand-600"
+      title="Sugestão da IA — ainda não validada por um revisor"
+    >
+      IA
+    </span>
   );
 }

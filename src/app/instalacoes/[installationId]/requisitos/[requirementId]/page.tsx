@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { format, addDays } from "date-fns";
-import { Sparkles, Trash2 } from "lucide-react";
+import { Sparkles, Trash2, FileText } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { getInstallationContext } from "@/lib/context";
 import { getOrCreateAssessment } from "@/lib/assessments";
@@ -22,11 +22,17 @@ import {
   addManualEvidence,
   removeEvidence,
   addComment,
+  dismissReviewFlag,
 } from "../actions";
 import { createAction } from "@/app/instalacoes/[installationId]/planos-de-acao/actions";
 import { ActionItem } from "@/components/ActionItem";
 import { CycleSwitcher } from "@/components/CycleSwitcher";
-import { LangSwitcher } from "@/components/LangSwitcher";
+import { resolveLang } from "@/lib/lang";
+import { shortTitle } from "@/lib/short-titles";
+import { ClassificationIcon, CriticalityBars as CritBars } from "@/components/StatusIcons";
+import { parseRequirement } from "@/lib/requirement-parts";
+import { CriticalityInfo, RobustnessInfo, ClassificationInfo } from "@/components/InfoTip";
+import { isAutoNotApplicable } from "@/lib/applicability";
 
 const FINAL_CLASSIFICATIONS = [
   { value: "ATENDE_TOTALMENTE", label: "Atende totalmente" },
@@ -66,7 +72,7 @@ export default async function RequirementDetailPage({
   const { installationId, requirementId } = await params;
   const { cycle: cycleParam, template: templateParam, lang: langParam, aiAction: aiActionParam } =
     await searchParams;
-  const lang = langParam === "en" ? "en" : "pt";
+  const lang = await resolveLang(langParam);
   const pick = (pt: string, en: string | null | undefined) => (lang === "en" ? en ?? pt : pt);
   const { installation, cycle, allCycles, isLatestCycle } = await getInstallationContext(
     installationId,
@@ -88,6 +94,7 @@ export default async function RequirementDetailPage({
         orderBy: { createdAt: "desc" },
         include: {
           dependsOn: { select: { id: true, description: true, status: true } },
+          closureDocument: { select: { id: true, title: true } },
           comments: { orderBy: { createdAt: "desc" } },
           logs: { orderBy: { createdAt: "desc" } },
         },
@@ -167,62 +174,101 @@ export default async function RequirementDetailPage({
 
   return (
     <div>
-      <div className="border-b border-mineral-200 bg-white px-8 py-6">
-        <div className="flex items-start justify-between gap-4">
-          <p className="text-xs text-mineral-500">
-            <Link
-              href={`/instalacoes/${installation.id}/requisitos${lang === "en" ? "?lang=en" : ""}`}
-              className="hover:text-brand-700"
-            >
-              Requisitos
+      <div className="content-shell pt-6">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <p className="truncate text-xs text-mineral-500">
+            <Link href={`/instalacoes/${installation.id}/requisitos`} className="font-medium text-brand-600 hover:underline">
+              ← Análise
             </Link>
-            {" / "}
-            Tópico {requirement.theme.principle.number} ·{" "}
-            {pick(requirement.theme.principle.name, requirement.theme.principle.nameEn)}
-            {" / "}
-            Princípio {requirement.theme.number} · {pick(requirement.theme.name, requirement.theme.nameEn)}
+            {" / "}Princípio {requirement.theme.number}
           </p>
-          <div className="flex items-center gap-3">
-            <CycleSwitcher cycles={allCycles} currentCycleId={cycle.id} />
-            <LangSwitcher lang={lang} extraParams={{ cycle: cycleParam }} />
+          <CycleSwitcher cycles={allCycles} currentCycleId={cycle.id} />
+        </div>
+
+        <div className="mt-3 rounded-2xl border border-mineral-200/80 bg-white px-6 py-5 shadow-[var(--shadow-card)]">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <h1 className="min-w-0 text-mineral-900" style={{ fontSize: "1.5rem" }}>
+              <span className="mr-2 font-mono text-mineral-400">{requirement.code}</span>
+              {shortTitle(requirement.code, pick(requirement.title, requirement.titleEn), lang)}
+            </h1>
+            <div className="flex items-center gap-2">
+              <ClassificationIcon
+                value={assessment.status === "VALIDADO" ? assessment.finalClassification : assessment.aiClassification}
+                validated={assessment.status === "VALIDADO"}
+                size={28}
+              />
+              <CritBars value={assessment.status === "VALIDADO" ? assessment.finalCriticality : assessment.aiCriticality} />
+            </div>
           </div>
+
+          {/* Texto oficial com as subdivisões a, b, c (item 13). */}
+          {(() => {
+            const parts = parseRequirement(pick(requirement.description, requirement.descriptionEn));
+            return (
+              <details className="group/txt mt-3 max-w-4xl text-sm leading-relaxed text-mineral-700">
+                <summary className="cursor-pointer list-none text-xs font-medium text-brand-600 hover:underline [&::-webkit-details-marker]:hidden">
+                  <span className="group-open/txt:hidden">Texto oficial{parts.items.length > 0 ? ` (a–${String.fromCharCode(96 + parts.items.length)})` : ""} ▸</span>
+                  <span className="hidden group-open/txt:inline">Ocultar texto oficial ▾</span>
+                </summary>
+                <div className="mt-2">
+                {parts.intro && <p>{parts.intro}</p>}
+                {parts.items.length > 0 && (
+                  <ol className="mt-2 space-y-2">
+                    {parts.items.map((it) => (
+                      <li key={it.label} className="flex gap-2.5">
+                        <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-brand-50 text-[11px] font-semibold text-brand-700">
+                          {it.label}
+                        </span>
+                        <div className="min-w-0">
+                          {it.text && <p>{it.text}</p>}
+                          {it.subItems.length > 0 && (
+                            <ul className="mt-1 space-y-1 text-mineral-600">
+                              {it.subItems.map((si) => (
+                                <li key={si.label} className="flex gap-2">
+                                  <span className="w-6 shrink-0 text-right font-mono text-xs text-mineral-400">{si.label}.</span>
+                                  <span>{si.text}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                        </div>
+                      </li>
+                    ))}
+                  </ol>
+                )}
+                </div>
+              </details>
+            );
+          })()}
+
+          {requirement.expectedEvidence && (
+            <details className="mt-3">
+              <summary className="cursor-pointer text-xs font-medium text-brand-600 hover:underline">
+                {lang === "en" ? "Expected evidence" : "Evidência esperada"}
+              </summary>
+              <p className="mt-1.5 max-w-3xl rounded-lg bg-mineral-50 px-3 py-2 text-xs text-mineral-600">
+                {pick(requirement.expectedEvidence, requirement.expectedEvidenceEn)}
+              </p>
+            </details>
+          )}
+          {!isLatestCycle && (
+            <p className="mt-3 rounded-lg border border-state-warn-line bg-state-warn-soft px-3 py-2 text-xs text-state-warn">
+              Ciclo encerrado ({cycle.name}) — somente leitura.
+            </p>
+          )}
         </div>
-        <div className="mt-1 flex items-center gap-3">
-          <h1 className="text-xl font-semibold text-mineral-900">
-            {requirement.code} — {pick(requirement.title, requirement.titleEn)}
-          </h1>
-          <ClassificationBadge value={assessment.finalClassification} />
-        </div>
-        <p className="mt-2 max-w-3xl text-sm text-mineral-600">
-          {pick(requirement.description, requirement.descriptionEn)}
-        </p>
-        {requirement.expectedEvidence && (
-          <p className="mt-2 max-w-3xl rounded-lg bg-mineral-50 px-3 py-2 text-xs text-mineral-500">
-            <span className="font-medium text-mineral-600">
-              {lang === "en" ? "Expected evidence: " : "Evidência esperada: "}
-            </span>
-            {pick(requirement.expectedEvidence, requirement.expectedEvidenceEn)}
-          </p>
-        )}
-        {!isLatestCycle && (
-          <p className="mt-3 rounded-lg border border-state-warn-line bg-state-warn-soft px-3 py-2 text-xs text-state-warn">
-            Você está visualizando um ciclo encerrado ({cycle.name}), somente leitura.
-          </p>
-        )}
       </div>
 
-      <div className="grid grid-cols-1 gap-6 p-8 lg:grid-cols-3">
+      <div className="content-shell grid grid-cols-1 gap-6 py-6 lg:grid-cols-3">
         <div className="space-y-6 lg:col-span-2">
           {/* Evidências e leitura de IA */}
           <Card>
             <CardHeader
-              title="Leitura inteligente de evidências"
+              title="Sugestão da IA"
               subtitle={
                 assessment.aiConfidence
-                  ? `Última sugestão da IA — confiança estimada ${Math.round(
-                      assessment.aiConfidence * 100
-                    )}%`
-                  : "Nenhuma leitura de IA executada ainda"
+                  ? `Confiança estimada ${Math.round(assessment.aiConfidence * 100)}%`
+                  : "Ainda sem sugestão"
               }
               action={
                 isLatestCycle && (
@@ -232,7 +278,7 @@ export default async function RequirementDetailPage({
                       className="flex items-center gap-2 rounded-lg bg-mineral-900 px-3 py-2 text-xs font-medium text-white hover:bg-mineral-700"
                     >
                       <Sparkles size={14} />
-                      Simular leitura por IA
+                      {assessment.aiClassification ? "Rodar de novo" : "Rodar análise"}
                     </button>
                   </form>
                 )
@@ -244,65 +290,65 @@ export default async function RequirementDetailPage({
                   <div className="mb-2 flex flex-wrap gap-2">
                     <ClassificationBadge value={assessment.aiClassification} />
                     <RobustnessBadge value={assessment.aiRobustness} />
-                    <CriticalityBadge value={assessment.aiCriticality} />
-                    <InfoSufficiencyBadge value={assessment.aiInfoSufficiency} />
+                    <CritBars value={assessment.aiCriticality} />
+                    {assessment.aiInfoSufficiency === "INSUFICIENTE" && (
+                      <InfoSufficiencyBadge value={assessment.aiInfoSufficiency} />
+                    )}
                   </div>
-                  <p className="text-sm text-mineral-700">{assessment.aiJustification}</p>
+                  {isAutoNotApplicable(assessment.aiJustification) ? (
+                    <p className="text-sm text-mineral-700">{assessment.aiJustification}</p>
+                  ) : (
+                    <OneLine text={assessment.aiJustification ?? ""} />
+                  )}
                 </div>
               ) : (
-                <EmptyState>
-                  Clique em &quot;Simular leitura por IA&quot; para gerar uma sugestão de
-                  classificação com base nos documentos vinculados a esta instalação.
-                </EmptyState>
+                <EmptyState>Sem sugestão ainda.</EmptyState>
               )}
 
               <h4 className="mb-2 mt-4 text-xs font-semibold uppercase tracking-wide text-mineral-500">
-                Evidências vinculadas ({evidences.length})
+                Evidências ({evidences.length})
               </h4>
               {evidences.length === 0 ? (
                 <p className="text-sm text-mineral-500">Nenhuma evidência vinculada ainda.</p>
               ) : (
-                <ul className="space-y-2">
+                <ul className="flex flex-wrap gap-2">
                   {evidences.map((ev) => (
-                    <li
-                      key={ev.id}
-                      className="flex items-start justify-between gap-3 rounded-lg border border-mineral-100 px-3 py-2.5"
-                    >
-                      <div className="min-w-0">
-                        <p className="text-xs font-medium text-mineral-800">
-                          {ev.document.title}
-                          {ev.aiGenerated && (
-                            <span className="ml-2 rounded-full bg-brand-50 px-2 py-0.5 text-[10px] font-medium text-brand-700">
-                              sugerido por IA
-                            </span>
-                          )}
-                        </p>
-                        <p className="mt-1 text-xs text-mineral-500">{ev.excerpt}</p>
-                      </div>
-                      {isLatestCycle && (
-                        <form
-                          action={removeEvidence.bind(null, installation.id, requirement.id, ev.id)}
+                    <li key={ev.id} className="max-w-full">
+                      <details className="group/ev rounded-xl border border-mineral-200 bg-white open:w-full open:bg-mineral-50">
+                        <summary
+                          className="flex cursor-pointer list-none items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-mineral-800 [&::-webkit-details-marker]:hidden"
+                          title={ev.excerpt}
                         >
-                          <button
-                            type="submit"
-                            className="rounded p-1 text-mineral-300 hover:bg-red-50 hover:text-red-600"
-                          >
-                            <Trash2 size={14} />
-                          </button>
-                        </form>
-                      )}
+                          <FileText size={13} className="shrink-0 text-mineral-400" />
+                          <span className="max-w-[16rem] truncate">{ev.document.title}</span>
+                          {ev.aiGenerated && (
+                            <span className="rounded-full border border-dashed border-brand-300 px-1.5 text-[10px] font-semibold text-brand-600">IA</span>
+                          )}
+                        </summary>
+                        <div className="flex items-start justify-between gap-3 border-t border-mineral-100 px-3 py-2">
+                          <p className="text-xs text-mineral-600">{ev.excerpt}</p>
+                          {isLatestCycle && (
+                            <form action={removeEvidence.bind(null, installation.id, requirement.id, ev.id)}>
+                              <button type="submit" title="Remover evidência" className="rounded p-1 text-mineral-300 hover:bg-red-50 hover:text-red-600">
+                                <Trash2 size={14} />
+                              </button>
+                            </form>
+                          )}
+                        </div>
+                      </details>
                     </li>
                   ))}
                 </ul>
               )}
 
               {isLatestCycle && (
-              <form action={addManualEvidence} className="mt-4 space-y-2 border-t border-mineral-100 pt-4">
+              <details className="mt-4 border-t border-mineral-100 pt-3">
+              <summary className="cursor-pointer text-xs font-medium text-brand-600 hover:underline">
+                + Vincular evidência manualmente
+              </summary>
+              <form action={addManualEvidence} className="mt-3 space-y-2">
                 <input type="hidden" name="installationId" value={installation.id} />
                 <input type="hidden" name="requirementId" value={requirement.id} />
-                <p className="text-xs font-medium text-mineral-600">
-                  Vincular evidência manualmente
-                </p>
                 <div className="flex gap-2">
                   <select name="documentId" className="input" required defaultValue="">
                     <option value="" disabled>
@@ -329,21 +375,35 @@ export default async function RequirementDetailPage({
                   Adicionar evidência
                 </button>
               </form>
+              </details>
               )}
             </div>
           </Card>
 
           {/* Revisão técnica humana */}
           <Card>
+            {assessment.reviewFlag && isLatestCycle && (
+              <div className="flex flex-wrap items-start justify-between gap-3 border-b border-state-warn-line bg-state-warn-soft px-5 py-3.5 text-sm text-state-warn">
+                <div className="min-w-0">
+                  <p className="font-semibold">Rever: documento novo</p>
+                  <p className="mt-0.5 text-mineral-700">{assessment.reviewFlag}</p>
+                </div>
+                <form action={dismissReviewFlag.bind(null, installation.id, assessment.id, requirement.id)}>
+                  <button type="submit" className="btn-secondary">
+                    Manter decisão
+                  </button>
+                </form>
+              </div>
+            )}
             <CardHeader
-              title="Revisão técnica humana"
+              title="Validação"
               subtitle={
                 assessment.status === "VALIDADO"
                   ? `Validado por ${assessment.reviewedBy} em ${format(
                       assessment.reviewedAt!,
                       "dd/MM/yyyy HH:mm"
                     )}`
-                  : "Aguardando validação de um revisor técnico"
+                  : "Confirme ou corrija a sugestão"
               }
             />
             {!isLatestCycle ? (
@@ -370,7 +430,7 @@ export default async function RequirementDetailPage({
               <input type="hidden" name="themeId" value={requirement.themeId} />
 
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                <Field label="Classificação final">
+                <Field label="Classificação final" info={<ClassificationInfo />}>
                   <select
                     name="finalClassification"
                     className="input"
@@ -389,7 +449,7 @@ export default async function RequirementDetailPage({
                     ))}
                   </select>
                 </Field>
-                <Field label="Robustez da evidência">
+                <Field label="Robustez da evidência" info={<RobustnessInfo />}>
                   <select
                     name="finalRobustness"
                     className="input"
@@ -406,7 +466,7 @@ export default async function RequirementDetailPage({
                     ))}
                   </select>
                 </Field>
-                <Field label="Criticidade do gap">
+                <Field label="Criticidade do gap" info={<CriticalityInfo align="right" />}>
                   <select
                     name="finalCriticality"
                     className="input"
@@ -497,15 +557,18 @@ export default async function RequirementDetailPage({
                 />
               </Field>
 
-              <label className="flex items-start gap-2 text-xs text-mineral-600">
-                <input type="checkbox" name="saveAsTemplate" className="mt-0.5" />
-                <span>Salvar esta justificativa como modelo aprovado, reutilizável em outros requisitos deste princípio</span>
-              </label>
-              <input
-                name="templateTitle"
-                className="input"
-                placeholder="Título curto do modelo (ex.: Evidência robusta de treinamento)"
-              />
+              <details>
+                <summary className="cursor-pointer text-xs font-medium text-mineral-500 hover:text-brand-600">
+                  Salvar como modelo de justificativa
+                </summary>
+                <div className="mt-2 space-y-2">
+                  <label className="flex items-start gap-2 text-xs text-mineral-600">
+                    <input type="checkbox" name="saveAsTemplate" className="mt-0.5" />
+                    <span>Reutilizar este texto em outros requisitos deste princípio</span>
+                  </label>
+                  <input name="templateTitle" className="input" placeholder="Título curto do modelo" />
+                </div>
+              </details>
 
               <button
                 type="submit"
@@ -521,7 +584,7 @@ export default async function RequirementDetailPage({
         <div className="space-y-6">
           {/* Plano de ação */}
           <Card>
-            <CardHeader title="Plano de ação" subtitle={`${assessment.actions.length} ação(ões)`} />
+            <CardHeader title={`Plano de ação (${assessment.actions.length})`} />
             <div className="px-5 py-4">
               {assessment.actions.length === 0 ? (
                 <p className="text-sm text-mineral-500">Nenhuma ação registrada.</p>
@@ -533,6 +596,7 @@ export default async function RequirementDetailPage({
                         action={action}
                         installationId={installation.id}
                         requirementId={requirement.id}
+                        documents={documents.map((d) => ({ id: d.id, title: d.title }))}
                         readOnly={!isLatestCycle}
                       />
                     </li>
@@ -541,20 +605,21 @@ export default async function RequirementDetailPage({
               )}
 
               {canCreateAction ? (
+                <details className="mt-4 border-t border-mineral-100 pt-3" open={aiActionParam === "1"}>
+                  <summary className="cursor-pointer list-none text-xs font-medium text-brand-600 hover:underline [&::-webkit-details-marker]:hidden">
+                    + Nova ação
+                  </summary>
                 <form
                   action={createAction}
                   key={`action-${aiActionParam ?? "template"}`}
-                  className="mt-4 space-y-2 border-t border-mineral-100 pt-4"
+                  className="mt-3 space-y-2"
                 >
                   <input type="hidden" name="installationId" value={installation.id} />
                   <input type="hidden" name="assessmentId" value={assessment.id} />
                   <input type="hidden" name="requirementId" value={requirement.id} />
                   <div className="flex items-center justify-between gap-2">
-                    <p className="text-xs font-medium text-mineral-600">
-                      Nova ação corretiva{" "}
-                      <span className="font-normal text-mineral-500">
-                        {aiActionSuggested ? "— sugerida pela IA a partir do gap" : "— revise antes de criar"}
-                      </span>
+                    <p className="text-xs text-mineral-500">
+                      {aiActionSuggested ? "Sugerida pela IA — revise" : "Revise antes de criar"}
                     </p>
                     <Link
                       href={`?${new URLSearchParams({
@@ -604,10 +669,10 @@ export default async function RequirementDetailPage({
                     Criar ação
                   </button>
                 </form>
+                </details>
               ) : (
                 <p className="mt-4 border-t border-mineral-100 pt-4 text-xs text-mineral-500">
-                  Ações corretivas ficam disponíveis quando a classificação final é
-                  &quot;Atende parcialmente&quot; ou &quot;Não atende&quot;.
+                  Disponível para Parcial ou Não atende.
                 </p>
               )}
             </div>
@@ -615,10 +680,10 @@ export default async function RequirementDetailPage({
 
           {/* Comentários e discussão */}
           <Card>
-            <CardHeader title="Comentários" subtitle={`${assessment.comments.length} comentário(s)`} />
+            <CardHeader title={`Comentários (${assessment.comments.length})`} />
             <div className="px-5 py-4">
               {assessment.comments.length === 0 ? (
-                <p className="text-sm text-mineral-500">Nenhum comentário ainda.</p>
+                <p className="text-sm text-mineral-500">Nenhum ainda.</p>
               ) : (
                 <ul className="space-y-3">
                   {assessment.comments.map((c) => (
@@ -632,7 +697,11 @@ export default async function RequirementDetailPage({
                 </ul>
               )}
               {isLatestCycle && (
-                <form action={addComment} className="mt-4 space-y-2 border-t border-mineral-100 pt-4">
+                <details className="mt-4 border-t border-mineral-100 pt-3">
+                  <summary className="cursor-pointer list-none text-xs font-medium text-brand-600 hover:underline [&::-webkit-details-marker]:hidden">
+                    + Comentar
+                  </summary>
+                <form action={addComment} className="mt-3 space-y-2">
                   <input type="hidden" name="installationId" value={installation.id} />
                   <input type="hidden" name="assessmentId" value={assessment.id} />
                   <input type="hidden" name="requirementId" value={requirement.id} />
@@ -651,6 +720,7 @@ export default async function RequirementDetailPage({
                     Comentar
                   </button>
                 </form>
+                </details>
               )}
             </div>
           </Card>
@@ -688,8 +758,12 @@ export default async function RequirementDetailPage({
 
           {/* Trilha de auditoria */}
           <Card>
-            <CardHeader title="Trilha de auditoria" />
-            <div className="px-5 py-4">
+            <details>
+            <summary className="flex cursor-pointer list-none items-center justify-between px-5 py-4 [&::-webkit-details-marker]:hidden">
+              <span className="text-sm font-semibold text-mineral-900">Trilha de auditoria</span>
+              <span className="text-xs text-mineral-500">{assessment.auditLogs.length} evento(s) · ver</span>
+            </summary>
+            <div className="border-t border-mineral-100 px-5 py-4">
               {assessment.auditLogs.length === 0 ? (
                 <p className="text-sm text-mineral-500">Sem eventos registrados.</p>
               ) : (
@@ -708,6 +782,7 @@ export default async function RequirementDetailPage({
                 </ul>
               )}
             </div>
+            </details>
           </Card>
         </div>
       </div>
@@ -715,7 +790,27 @@ export default async function RequirementDetailPage({
   );
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({
+  label,
+  info,
+  children,
+}: {
+  label: string;
+  info?: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  // <div> quando há ícone "i": um <details> não pode ficar dentro de <label>.
+  if (info) {
+    return (
+      <div className="block">
+        <span className="mb-1 flex items-center gap-1 text-xs font-medium text-mineral-600">
+          {label}
+          {info}
+        </span>
+        {children}
+      </div>
+    );
+  }
   return (
     <label className="block">
       <span className="mb-1 block text-xs font-medium text-mineral-600">{label}</span>
@@ -727,8 +822,28 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 function actionLabel(action: string): string {
   const labels: Record<string, string> = {
     SUGESTAO_IA_GERADA: "Sugestão de IA gerada",
+    NAO_SE_APLICA_AUTOMATICO: "\"Não se aplica\" automático",
+    REVISAO_SUGERIDA: "Documento novo sugere revisão",
+    REVISAO_DISPENSADA: "Aviso de revisão dispensado",
     AVALIACAO_VALIDADA: "Avaliação validada",
     ACAO_CRIADA: "Ação corretiva criada",
   };
   return labels[action] ?? action;
+}
+
+/** Justificativa em uma linha: a conclusão visível, o resto em "ver mais". */
+function OneLine({ text }: { text: string }) {
+  const m = text.match(/^(.+?[.!?])(\s|$)/);
+  const first = m ? m[1] : text;
+  const rest = text.slice(first.length).trim();
+  if (!rest) return <p className="text-sm text-mineral-700">{first}</p>;
+  return (
+    <details className="group/j">
+      <summary className="cursor-pointer list-none text-sm text-mineral-700 [&::-webkit-details-marker]:hidden">
+        {first}{" "}
+        <span className="text-xs font-medium text-brand-600 group-open/j:hidden">ver mais</span>
+      </summary>
+      <p className="mt-1 text-sm text-mineral-600">{rest}</p>
+    </details>
+  );
 }

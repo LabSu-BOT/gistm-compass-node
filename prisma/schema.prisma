@@ -90,6 +90,17 @@ model User {
 // Instalações e ciclos de avaliação
 // ---------------------------------------------------------------------------
 
+// Fase do ciclo de vida da estrutura. Estruturas NOVA ou EM_CONSTRUCAO
+// recebem "Não se aplica" automático nos requisitos válidos só para
+// estruturas existentes (ver src/lib/applicability.ts).
+enum InstallationPhase {
+  NOVA
+  EM_CONSTRUCAO
+  OPERACAO
+  INATIVA
+  FECHAMENTO
+}
+
 model Installation {
   id             String       @id @default(cuid())
   name           String
@@ -97,12 +108,40 @@ model Installation {
   organization   Organization @relation(fields: [organizationId], references: [id])
   createdAt      DateTime     @default(now())
 
+  // Cadastro da estrutura (itens 10 e 11)
+  location             String?
+  phase                InstallationPhase @default(OPERACAO)
+  hasDpaClassification Boolean?          // já tem classificação de DPA?
+  dpaClassification    String?           // ALTO | MEDIO | BAIXO
+  eorName              String?           // Engenheiro de Registro (EoR)
+  eorCompany           String?
+  eorEmail             String?
+  rtfeName             String?           // Engenheiro Responsável pela Estrutura (RTFE)
+  accountableExecutive String?           // Executivo Responsável
+  otherResponsibles    String?           // demais pessoas (texto livre, uma por linha)
+
   documents        DocumentFile[]
   assessments      Assessment[]
   cycles           Cycle[]
   externalAnalyses ExternalAnalysis[]
+  analysisRuns     AnalysisRun[]
 
   @@index([organizationId])
+}
+
+// Registro de cada "Analisar documentos novos": quais documentos entraram e o
+// que cada um acrescentou, para mostrar o resumo na Análise.
+model AnalysisRun {
+  id             String       @id @default(cuid())
+  installationId String
+  installation   Installation @relation(fields: [installationId], references: [id])
+  cycleId        String
+  mode           String       // INCREMENTAL | COMPLETA
+  summaryJson    String       // ver IncrementalSummary em src/lib/incremental-analysis.ts
+  createdBy      String
+  createdAt      DateTime     @default(now())
+
+  @@index([installationId, cycleId])
 }
 
 model Cycle {
@@ -134,6 +173,9 @@ model DocumentFile {
   filePath         String
   mimeType         String
   extractedText    String?
+  // Quando o documento entrou numa análise da IA. Nulo = documento novo,
+  // ainda não analisado (ver src/lib/incremental-analysis.ts).
+  analyzedAt       DateTime?
   installationId   String
   installation     Installation @relation(fields: [installationId], references: [id])
   uploadedAt       DateTime @default(now())
@@ -151,6 +193,8 @@ model DocumentFile {
   nextVersions      DocumentFile[] @relation("DocumentVersionChain")
 
   evidences Evidence[]
+  // Ações encerradas usando este documento como evidência (item 19)
+  closedActions Action[] @relation("ActionClosureDocument")
 
   @@index([installationId])
 }
@@ -232,6 +276,12 @@ model Assessment {
   status       ReviewStatus @default(SUGESTAO_IA)
   reviewedBy   String?
   reviewedAt   DateTime?
+
+  // Aviso "Rever": um documento novo sugere outra classificação para um
+  // requisito já validado. A decisão humana NÃO é alterada; o aviso some
+  // ao revalidar ou ao dispensá-lo.
+  reviewFlag   String?
+  reviewFlagAt DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -316,7 +366,14 @@ model Action {
   dueDate         DateTime?
   priority        ActionPriority @default(MEDIA)
   status          ActionStatus   @default(ABERTA)
-  closureEvidence String?
+  // Código legível da ação, sequencial por estrutura: PA-001, PA-002... (item 16)
+  code            String?
+  // Evidência de encerramento (item 19): documento anexado + link, além da
+  // observação em texto que já existia.
+  closureEvidence   String?
+  closureDocumentId String?
+  closureDocument   DocumentFile? @relation("ActionClosureDocument", fields: [closureDocumentId], references: [id])
+  closureLink       String?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
