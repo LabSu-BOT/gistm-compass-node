@@ -4,22 +4,45 @@ import { redirect, notFound } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { auth } from "@/auth";
 import { withOrgContext } from "@/lib/tenant-db";
+import { flash } from "@/lib/flash";
+import { applyAutomaticNotApplicable } from "@/lib/applicability";
+import type { InstallationPhase } from "@prisma/client";
+
+const PHASES = ["NOVA", "EM_CONSTRUCAO", "OPERACAO", "INATIVA", "FECHAMENTO"] as const;
+
+function readInstallationForm(formData: FormData) {
+  const text = (key: string) => String(formData.get(key) ?? "").trim();
+  const phaseRaw = text("phase");
+  const phase: InstallationPhase = (PHASES as readonly string[]).includes(phaseRaw)
+    ? (phaseRaw as InstallationPhase)
+    : "OPERACAO";
+  const dpa = text("hasDpaClassification");
+  const dpaClass = text("dpaClassification");
+  return {
+    name: text("name"),
+    location: text("location") || null,
+    phase,
+    hasDpaClassification: dpa === "SIM" ? true : dpa === "NAO" ? false : null,
+    dpaClassification: ["ALTO", "MEDIO", "BAIXO"].includes(dpaClass) ? dpaClass : null,
+    eorName: text("eorName") || null,
+    eorCompany: text("eorCompany") || null,
+    eorEmail: text("eorEmail") || null,
+    rtfeName: text("rtfeName") || null,
+    accountableExecutive: text("accountableExecutive") || null,
+    otherResponsibles: text("otherResponsibles") || null,
+  };
+}
 
 export async function createInstallation(formData: FormData) {
   const session = await auth();
   if (!session?.user) redirect("/login");
 
-  const name = String(formData.get("name") ?? "").trim();
-  const location = String(formData.get("location") ?? "").trim();
-
-  if (!name) throw new Error("Informe o nome da instalação/estrutura.");
+  const data = readInstallationForm(formData);
+  if (!data.name) throw new Error("Informe o nome da estrutura.");
 
   const installation = await withOrgContext(session.user.organizationId, async (tx) => {
     const created = await tx.installation.create({
-      data: {
-        name: location ? `${name} — ${location}` : name,
-        organizationId: session.user.organizationId,
-      },
+      data: { ...data, organizationId: session.user.organizationId },
     });
 
     const year = new Date().getFullYear();
@@ -30,8 +53,40 @@ export async function createInstallation(formData: FormData) {
     return created;
   });
 
+  const autoNsa = await applyAutomaticNotApplicable(installation.id, data.phase);
+
   revalidatePath("/instalacoes");
+  await flash(
+    autoNsa > 0
+      ? `Estrutura cadastrada. ${autoNsa} requisito(s) marcados como "Não se aplica" para revisão.`
+      : "Estrutura cadastrada."
+  );
   redirect(`/instalacoes/${installation.id}/dashboard`);
+}
+
+export async function updateInstallation(installationId: string, formData: FormData) {
+  const session = await auth();
+  if (!session?.user) redirect("/login");
+
+  const data = readInstallationForm(formData);
+  if (!data.name) throw new Error("Informe o nome da estrutura.");
+
+  const current = await withOrgContext(session.user.organizationId, async (tx) => {
+    const found = await tx.installation.findUnique({ where: { id: installationId } });
+    if (!found || found.organizationId !== session.user.organizationId) notFound();
+    await tx.installation.update({ where: { id: installationId }, data });
+    return found;
+  });
+
+  let note = "";
+  if (data.phase !== current.phase) {
+    const n = await applyAutomaticNotApplicable(installationId, data.phase);
+    if (n > 0) note = ` ${n} requisito(s) atualizados pela regra de "Não se aplica".`;
+  }
+
+  revalidatePath(`/instalacoes/${installationId}`, "layout");
+  revalidatePath("/instalacoes");
+  await flash(`Dados da estrutura salvos.${note}`);
 }
 
 export async function deleteInstallation(installationId: string) {
@@ -70,6 +125,7 @@ export async function deleteInstallation(installationId: string) {
     await tx.evidence.deleteMany({ where: { document: { installationId } } });
     await tx.assessment.deleteMany({ where: { installationId } });
     await tx.externalAnalysis.deleteMany({ where: { installationId } });
+    await tx.analysisRun.deleteMany({ where: { installationId } });
     await tx.documentFile.deleteMany({ where: { installationId } });
     await tx.cycle.deleteMany({ where: { installationId } });
     await tx.installation.delete({ where: { id: installationId } });

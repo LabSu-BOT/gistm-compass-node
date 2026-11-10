@@ -7,6 +7,8 @@ import type {
   Requirement,
 } from "@prisma/client";
 import { runDocumentAgent, AiAgentNotConfiguredError } from "@/lib/ai-agent";
+import { aggregateItems, rubricPrompt } from "@/lib/assessment-rubric";
+import { parseRequirement } from "@/lib/requirement-parts";
 
 /**
  * Avaliação de conformidade com IA real (Claude), agora sobre o núcleo agêntico
@@ -14,11 +16,11 @@ import { runDocumentAgent, AiAgentNotConfiguredError } from "@/lib/ai-agent";
  * por palavra-chave, a IA tem acesso à base documental inteira: localiza,
  * consulta o conteúdo integral, cruza documentos e só então classifica.
  *
- * Critérios menos rígidos: a existência de um documento esperado já é evidência
- * positiva e pode significar atendimento parcial — a IA não classifica como
- * "não atende" só porque o conteúdo não comprova tudo. E não conclui ausência
- * de forma precipitada: verifica documentos relacionados e termos equivalentes
- * antes de dizer que não localizou.
+ * Régua de rigor em `assessment-rubric.ts`. A IA avalia cada item do
+ * requisito (a, b, c…) e o resultado do requisito é consolidado a partir dos
+ * itens (`aggregateItems`), como numa auditoria por critério. Não conclui
+ * ausência de forma precipitada: verifica documentos relacionados e termos
+ * equivalentes antes de dizer que não localizou.
  *
  * Qualquer falha (sem chave, erro, JSON inválido, enum fora do esperado) retorna
  * null — quem chamou cai de volta para a heurística determinística.
@@ -42,6 +44,8 @@ export interface RealAiAssessment {
   confidence: number;
   justification: string;
   evidences: { documentId: string; excerpt: string }[];
+  /** Avaliação item a item (a, b, c…), quando o requisito tem subdivisões. */
+  items: { label: string; classification: FinalClassification; note: string }[];
 }
 
 export async function generateRealAiAssessment(
@@ -53,7 +57,8 @@ export async function generateRealAiAssessment(
 ): Promise<RealAiAssessment | null> {
   try {
     const system = buildSystemPrompt();
-    const userPrompt = buildUserPrompt(requirement, priorAnalysis);
+    const parts = parseRequirement(requirement.description).items;
+    const userPrompt = buildUserPrompt(requirement, priorAnalysis, parts);
 
     // Veredito entregue como chamada de ferramenta estrita — a API valida o
     // formato, então não há JSON.parse frágil de texto livre.
@@ -102,14 +107,38 @@ export async function generateRealAiAssessment(
       )
       .slice(0, 3);
 
+    // Itens a, b, c…: o requisito é consolidado a partir deles quando vierem.
+    const labels = new Set(parts.map((it) => it.label));
+    const items = (Array.isArray(p.items) ? p.items : [])
+      .filter(
+        (it): it is { label: string; classification: string; note: string } =>
+          typeof it === "object" &&
+          it !== null &&
+          typeof (it as Record<string, unknown>).label === "string" &&
+          labels.has((it as Record<string, unknown>).label as string) &&
+          VALID_CLASSIFICATION.has((it as Record<string, unknown>).classification as string)
+      )
+      .map((it) => ({
+        label: it.label,
+        classification: it.classification as FinalClassification,
+        note: typeof it.note === "string" ? it.note : "",
+      }));
+    const consolidated = items.length === parts.length ? aggregateItems(items.map((i) => i.classification)) : null;
+    const classification = consolidated ?? (p.classification as FinalClassification);
+    const itemSummary =
+      items.length > 0
+        ? " Itens: " + items.map((i) => `${i.label}) ${CLASS_SHORT[i.classification]}`).join("; ") + "."
+        : "";
+
     return {
-      classification: p.classification as FinalClassification,
+      classification,
       robustness: p.robustness as EvidenceRobustness,
       criticality: p.criticality as GapCriticality,
       infoSufficiency: p.infoSufficiency as InfoSufficiency,
       confidence: Math.max(0, Math.min(1, p.confidence)),
-      justification: p.justification,
+      justification: p.justification.trim() + itemSummary,
       evidences,
+      items,
     };
   } catch (err) {
     if (err instanceof AiAgentNotConfiguredError) return null;
@@ -117,6 +146,13 @@ export async function generateRealAiAssessment(
     return null;
   }
 }
+
+const CLASS_SHORT: Record<FinalClassification, string> = {
+  ATENDE_TOTALMENTE: "atende",
+  ATENDE_PARCIALMENTE: "parcial",
+  NAO_ATENDE: "não atende",
+  NAO_SE_APLICA: "não se aplica",
+};
 
 // Ferramenta terminal: a IA a chama para registrar o veredito. `strict: true`
 // (aplicado em runDocumentAgent) garante que o input valida contra este schema.
@@ -145,6 +181,25 @@ const REGISTRAR_AVALIACAO_TOOL = {
           "isso (ex.: 'com base no PAE Rev 1 e no Relatório de Simulado...'). Diga em uma frase o " +
           "que ainda falta, quando não atende totalmente.",
       },
+      items: {
+        type: "array",
+        description:
+          "Uma entrada por item do requisito (a, b, c…) listado no pedido; lista vazia se o requisito " +
+          "não tiver itens. O resultado do requisito é consolidado a partir destes itens.",
+        items: {
+          type: "object",
+          properties: {
+            label: { type: "string", description: "letra do item, ex.: a" },
+            classification: {
+              type: "string",
+              enum: ["ATENDE_TOTALMENTE", "ATENDE_PARCIALMENTE", "NAO_ATENDE", "NAO_SE_APLICA"],
+            },
+            note: { type: "string", description: "uma frase: o que comprova ou o que falta" },
+          },
+          required: ["label", "classification", "note"],
+          additionalProperties: false,
+        },
+      },
       evidences: {
         type: "array",
         description: "Até 3 evidências que mais pesaram; lista vazia se nada for relevante.",
@@ -166,6 +221,7 @@ const REGISTRAR_AVALIACAO_TOOL = {
       "infoSufficiency",
       "confidence",
       "justification",
+      "items",
       "evidences",
     ],
     additionalProperties: false,
@@ -187,20 +243,14 @@ function buildSystemPrompt(): string {
     `NÃO CONCLUA AUSÊNCIA PRECIPITADAMENTE: antes de dizer que algo não foi localizado, verifique ` +
     `documentos potencialmente relacionados, tente termos equivalentes/sinônimos, e considere ` +
     `referências cruzadas. Só então conclua que não encontrou — e diga onde procurou.\n\n` +
-    `CRITÉRIOS DE ATENDIMENTO (menos rígidos — a EXISTÊNCIA de um documento já é evidência positiva):\n` +
-    `- ATENDE_TOTALMENTE: há evidência documental clara e específica cobrindo o que o requisito pede.\n` +
-    `- ATENDE_PARCIALMENTE: o documento esperado EXISTE e tem relação com o critério, mas a ` +
-    `informação disponível não comprova todos os requisitos. Use TAMBÉM para "evidência encontrada, ` +
-    `mas insuficiente" — NÃO classifique como não atende só porque o conteúdo não comprova tudo; ` +
-    `reconheça a evidência documental e explique o que ainda não foi comprovado.\n` +
-    `- NAO_ATENDE: nenhuma evidência foi localizada (após verificar de verdade) OU o documento ` +
-    `claramente não atende ao critério.\n` +
-    `- NAO_SE_APLICA: o requisito não se aplica a esta instalação.\n\n` +
+    `${rubricPrompt()}\n\n` +
+    `AVALIE ITEM A ITEM: quando o requisito tiver itens (a, b, c…), classifique cada um ` +
+    `separadamente em "items" com a mesma régua; a classificação do requisito será consolidada a ` +
+    `partir deles (todos atendem → atende; nenhum atende → não atende; mistura → parcial).\n\n` +
     `Decida também:\n` +
     `- robustness: ROBUSTA | PARCIAL | FRACA | AUSENTE (força da evidência). Documento existe mas ` +
     `conteúdo insuficiente → FRACA (não AUSENTE).\n` +
-    `- criticality: ALTA | MEDIA | BAIXA | NAO_SE_APLICA (NAO_SE_APLICA só se ATENDE_TOTALMENTE ou ` +
-    `NAO_SE_APLICA; senão avalie o risco de o gap não ser corrigido).\n` +
+    `- criticality: conforme a régua de criticidade acima.\n` +
     `- infoSufficiency: SUFICIENTE | INSUFICIENTE (havia informação suficiente pra decidir com segurança?).\n` +
     `- confidence: 0 a 1.\n` +
     `- justification: CURTA e DIRETA (2 a 4 frases), em português, escrita por você com suas próprias ` +
@@ -217,11 +267,16 @@ function buildSystemPrompt(): string {
 
 function buildUserPrompt(
   requirement: Pick<Requirement, "code" | "title" | "description" | "expectedEvidence">,
-  priorAnalysis?: string | null
+  priorAnalysis: string | null | undefined,
+  items: { label: string; text: string }[]
 ): string {
   return (
     `Avalie a conformidade com o requisito ${requirement.code}: ${requirement.title}\n` +
     `${requirement.description}` +
+    (items.length > 0
+      ? `\n\nItens a avaliar um a um (preencha "items" com uma entrada para cada):\n` +
+        items.map((it) => `${it.label}) ${it.text}`).join("\n")
+      : `\n\nEste requisito não tem itens separados: deixe "items" vazio.`) +
     (requirement.expectedEvidence
       ? `\n\nEvidência tipicamente esperada para este requisito: ${requirement.expectedEvidence}`
       : "") +

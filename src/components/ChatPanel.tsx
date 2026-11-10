@@ -18,7 +18,14 @@ const SUGGESTIONS = [
   "Há evidência de consulta pública com comunidades afetadas?",
 ];
 
-export function ChatPanel({ installationId }: { installationId: string }) {
+export function ChatPanel({
+  installationId,
+  className,
+}: {
+  installationId: string;
+  /** Permite usar o chat dentro do painel flutuante do Assistente (item 6). */
+  className?: string;
+}) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [isPending, startTransition] = useTransition();
@@ -55,7 +62,12 @@ export function ChatPanel({ installationId }: { installationId: string }) {
   }
 
   return (
-    <div className="flex h-[calc(100vh-220px)] min-h-[420px] flex-col rounded-xl border border-mineral-200 bg-white shadow-sm">
+    <div
+      className={
+        className ??
+        "flex h-[calc(100vh-220px)] min-h-[420px] flex-col rounded-xl border border-mineral-200 bg-white shadow-sm"
+      }
+    >
       <div className="flex-1 overflow-y-auto px-5 py-5">
         {messages.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center gap-4 text-center">
@@ -65,9 +77,7 @@ export function ChatPanel({ installationId }: { installationId: string }) {
                 Pergunte qualquer coisa sobre esta instalação
               </p>
               <p className="mt-1 max-w-sm text-xs text-mineral-500">
-                As respostas são geradas a partir dos documentos enviados em &quot;Documentos&quot; —
-                se a informação não estiver na base documental, o assistente vai dizer isso em
-                vez de inventar.
+                Respostas com base na Documentação desta estrutura.
               </p>
             </div>
             <div className="flex flex-col gap-2">

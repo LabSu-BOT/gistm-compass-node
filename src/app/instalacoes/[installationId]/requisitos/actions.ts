@@ -6,6 +6,10 @@ import { getInstallationContext, assertInstallationOwnership } from "@/lib/conte
 import { getOrCreateAssessment } from "@/lib/assessments";
 import { simulateAiReading } from "@/lib/ai-simulator";
 import { generateRealAiAssessment } from "@/lib/ai-evidence";
+import { flash } from "@/lib/flash";
+import { isAutoNotApplicable } from "@/lib/applicability";
+import { analyzeNewDocuments } from "@/lib/incremental-analysis";
+import { auth } from "@/auth";
 import type {
   DocumentFile,
   EvidenceRobustness,
@@ -129,6 +133,7 @@ export async function runAiSimulation(installationId: string, requirementId: str
   await applyAiSuggestion(requirement, documents, installation.id, cycle.id, true);
 
   revalidateRequirement(installation.id, requirementId);
+  await flash("Sugestão da IA atualizada.");
 }
 
 export async function runAiSimulationForAll(installationId: string) {
@@ -137,18 +142,97 @@ export async function runAiSimulationForAll(installationId: string) {
     throw new Error("Não é possível rodar a IA em um ciclo encerrado.");
   }
 
-  const [requirements, documents] = await Promise.all([
+  const [requirements, documents, existing] = await Promise.all([
     prisma.requirement.findMany(),
     prisma.documentFile.findMany({ where: { installationId: installation.id } }),
+    prisma.assessment.findMany({
+      where: { installationId: installation.id, cycleId: cycle.id },
+      select: { requirementId: true, aiJustification: true },
+    }),
   ]);
 
-  for (const requirement of requirements) {
-    await applyAiSuggestion(requirement, documents, installation.id, cycle.id, false);
+  // Requisitos com "Não se aplica" automático (estrutura nova/em construção)
+  // não são reanalisados, a regra de aplicabilidade prevalece (item 12).
+  const autoNsa = new Set(
+    existing.filter((a) => isAutoNotApplicable(a.aiJustification)).map((a) => a.requirementId)
+  );
+  const toAnalyze = requirements.filter((r) => !autoNsa.has(r.id));
+
+  // Antes era um laço sequencial com ~4 consultas por requisito (77 x 4 em
+  // série). Em lotes paralelos o tempo total cai bastante (item 3), sem
+  // abrir conexões demais com o banco.
+  const BATCH = 8;
+  for (let i = 0; i < toAnalyze.length; i += BATCH) {
+    await Promise.all(
+      toAnalyze
+        .slice(i, i + BATCH)
+        .map((requirement) => applyAiSuggestion(requirement, documents, installation.id, cycle.id, false))
+    );
   }
+
+  // Todos os documentos entraram nesta leitura: nenhum fica como "novo".
+  await prisma.documentFile.updateMany({
+    where: { installationId: installation.id, analyzedAt: null },
+    data: { analyzedAt: new Date() },
+  });
 
   revalidatePath(`/instalacoes/${installation.id}/requisitos`);
   revalidatePath(`/instalacoes/${installation.id}/dashboard`);
+  revalidatePath(`/instalacoes/${installation.id}/documentos`);
   revalidatePath("/instalacoes");
+  await flash(`Análise concluída: ${toAnalyze.length} sugestões para validar.`);
+}
+
+/**
+ * "Analisar documentos novos": avalia só os documentos que ainda não passaram
+ * pela IA, acrescenta evidências sem apagar nada e nunca altera uma decisão
+ * validada, apenas marca "Rever" quando o documento novo discorda.
+ */
+export async function runAiForNewDocuments(installationId: string) {
+  const { installation, cycle, isLatestCycle } = await getInstallationContext(installationId);
+  if (!isLatestCycle) throw new Error("Não é possível rodar a IA em um ciclo encerrado.");
+  const session = await auth();
+  const actor = session?.user?.name ?? session?.user?.email ?? "Usuário";
+
+  const summary = await analyzeNewDocuments(installation.id, cycle.id, actor);
+
+  revalidatePath(`/instalacoes/${installation.id}/requisitos`);
+  revalidatePath(`/instalacoes/${installation.id}/dashboard`);
+  revalidatePath(`/instalacoes/${installation.id}/documentos`);
+  revalidatePath("/instalacoes");
+
+  if (!summary) {
+    await flash("Nenhum documento novo para analisar.", "info");
+    return;
+  }
+  const t = summary.totals;
+  const touched = new Set(summary.documents.flatMap((d) => d.evidenceAdded)).size;
+  await flash(
+    touched === 0
+      ? `${summary.documents.length} documento(s) analisado(s): nenhuma evidência nova encontrada.`
+      : `${summary.documents.length} documento(s) analisado(s): evidência nova em ${touched} requisito(s)` +
+          (t.flaggedForReview > 0 ? `, ${t.flaggedForReview} validado(s) para rever` : "") +
+          ". Veja o resumo na Análise.",
+    t.flaggedForReview > 0 ? "warn" : "ok"
+  );
+}
+
+/** Dispensa o aviso "Rever" mantendo a decisão validada como está. */
+export async function dismissReviewFlag(installationId: string, assessmentId: string, requirementId: string) {
+  await assertInstallationOwnership(installationId);
+  await assertAssessmentBelongsToInstallation(installationId, assessmentId);
+  const session = await auth();
+  await prisma.assessment.update({ where: { id: assessmentId }, data: { reviewFlag: null, reviewFlagAt: null } });
+  await prisma.auditLog.create({
+    data: {
+      assessmentId,
+      actor: session?.user?.name ?? "Usuário",
+      action: "REVISAO_DISPENSADA",
+      note: "Decisão validada mantida após documento novo.",
+    },
+  });
+  revalidateRequirement(installationId, requirementId);
+  await flash("Aviso dispensado. A decisão validada foi mantida.");
 }
 
 export async function validateAssessment(formData: FormData) {
@@ -183,6 +267,8 @@ export async function validateAssessment(formData: FormData) {
       status: "VALIDADO",
       reviewedBy,
       reviewedAt: new Date(),
+      reviewFlag: null,
+      reviewFlagAt: null,
     },
   });
 
@@ -226,6 +312,7 @@ export async function validateAssessment(formData: FormData) {
   }
 
   revalidateRequirement(installationId, requirementId);
+  await flash("Avaliação validada.");
 }
 
 export async function addComment(formData: FormData) {
@@ -244,6 +331,7 @@ export async function addComment(formData: FormData) {
   await prisma.comment.create({ data: { assessmentId, author, text } });
 
   revalidatePath(`/instalacoes/${installationId}/requisitos/${requirementId}`);
+  await flash("Comentário publicado.");
 }
 
 
@@ -267,6 +355,7 @@ export async function addManualEvidence(formData: FormData) {
   });
 
   revalidatePath(`/instalacoes/${installationId}/requisitos/${requirementId}`);
+  await flash("Evidência vinculada.");
 }
 
 export async function removeEvidence(
@@ -285,4 +374,5 @@ export async function removeEvidence(
 
   await prisma.evidence.delete({ where: { id: evidenceId } });
   revalidatePath(`/instalacoes/${installationId}/requisitos/${requirementId}`);
+  await flash("Evidência removida.");
 }

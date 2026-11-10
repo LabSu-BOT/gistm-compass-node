@@ -1,39 +1,47 @@
-// Alternância PT/EN para o conteúdo oficial do GISTM (nomes de tópicos/temas,
-// título e descrição dos requisitos). Preserva os demais parâmetros de busca
-// já presentes na URL (ciclo, tema, nível de detalhamento etc.).
+"use client";
+
+import clsx from "clsx";
+
+const LANG_COOKIE = "gistm_lang";
+
+/**
+ * Alternância PT/EN do conteúdo oficial do GISTM. Grava a escolha num cookie
+ * (lido por `resolveLang` no servidor) e recarrega a página atual sem o
+ * parâmetro `lang` da URL, para que a escolha valha em todas as abas.
+ *
+ * `extraParams` é mantido por compatibilidade com as chamadas antigas, mas não
+ * é mais necessário: os demais parâmetros da URL são preservados.
+ */
 export function LangSwitcher({
   lang,
-  extraParams,
 }: {
   lang: "pt" | "en";
   extraParams?: Record<string, string | undefined>;
 }) {
-  const hrefFor = (target: "pt" | "en") => {
-    const qs = new URLSearchParams();
-    for (const [key, value] of Object.entries(extraParams ?? {})) {
-      if (value) qs.set(key, value);
-    }
-    if (target === "en") qs.set("lang", "en");
-    // Sempre prefixado com "?", mesmo vazio: um href="" faz o navegador manter
-    // a query string atual (recarrega a mesma URL), o que impediria voltar
-    // para PT quando não há nenhum outro parâmetro além do lang.
-    return `?${qs.toString()}`;
-  };
+  function choose(target: "pt" | "en") {
+    if (target === lang) return;
+    document.cookie = `${LANG_COOKIE}=${target}; path=/; max-age=31536000; samesite=lax`;
+    const url = new URL(window.location.href);
+    url.searchParams.delete("lang");
+    window.location.assign(url.toString());
+  }
 
   return (
-    <div className="flex rounded-lg border border-mineral-300 p-0.5 text-xs">
-      <a
-        href={hrefFor("pt")}
-        className={`rounded-md px-3 py-1.5 font-medium ${lang === "pt" ? "bg-brand-800 text-white" : "text-mineral-600"}`}
-      >
-        PT
-      </a>
-      <a
-        href={hrefFor("en")}
-        className={`rounded-md px-3 py-1.5 font-medium ${lang === "en" ? "bg-brand-800 text-white" : "text-mineral-600"}`}
-      >
-        EN
-      </a>
+    <div className="flex rounded-full border border-mineral-200 bg-white p-0.5 text-xs" role="group" aria-label="Idioma do conteúdo GISTM">
+      {(["pt", "en"] as const).map((l) => (
+        <button
+          key={l}
+          type="button"
+          onClick={() => choose(l)}
+          aria-pressed={lang === l}
+          className={clsx(
+            "rounded-full px-2.5 py-1 font-medium uppercase transition-colors",
+            lang === l ? "bg-brand-500 text-white" : "text-mineral-600 hover:text-mineral-900"
+          )}
+        >
+          {l}
+        </button>
+      ))}
     </div>
   );
 }

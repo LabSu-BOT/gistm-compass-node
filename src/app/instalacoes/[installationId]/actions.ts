@@ -4,6 +4,8 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { assertInstallationOwnership } from "@/lib/context";
+import { flash } from "@/lib/flash";
+import { applyAutomaticNotApplicable } from "@/lib/applicability";
 
 export async function startNewCycle(
   installationId: string,
@@ -13,7 +15,7 @@ export async function startNewCycle(
   const name = String(formData.get("name") ?? "").trim();
   if (!name) throw new Error("Informe um nome para o novo ciclo de avaliação.");
 
-  await assertInstallationOwnership(installationId);
+  const installation = await assertInstallationOwnership(installationId);
   const currentCycle = await prisma.cycle.findUnique({ where: { id: currentCycleId } });
   if (!currentCycle || currentCycle.installationId !== installationId) {
     throw new Error("Ciclo não encontrado nesta instalação.");
@@ -28,10 +30,14 @@ export async function startNewCycle(
     data: { name, installationId },
   });
 
+  // O "Não se aplica" automático vale também para o novo ciclo (item 12).
+  await applyAutomaticNotApplicable(installationId, installation.phase);
+
   revalidatePath(`/instalacoes/${installationId}/dashboard`);
   revalidatePath(`/instalacoes/${installationId}/requisitos`);
   revalidatePath(`/instalacoes/${installationId}/planos-de-acao`);
   revalidatePath("/instalacoes");
 
+  await flash(`${name} iniciado.`);
   redirect(`/instalacoes/${installationId}/dashboard?cycle=${newCycle.id}`);
 }
