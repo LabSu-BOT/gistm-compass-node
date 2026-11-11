@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { auth } from "@/auth";
 import { getInstallationContext } from "@/lib/context";
 import { PageHeader, PageBody, Card, EmptyState } from "@/components/ui";
 import { importDocumentsBatch, finishImport, prepareDirectUploads, registerDirectUpload, deleteDocument, approveDisclosure, updateDocumentDetails } from "./actions";
@@ -36,6 +37,7 @@ export default async function DocumentosPage({
   params: Promise<{ installationId: string }>;
   searchParams: Promise<SearchParamsRecord>;
 }) {
+  const userName = (await auth())?.user?.name ?? "";
   const { installationId } = await params;
   const sp = await searchParams;
   const q = typeof sp.q === "string" ? sp.q : "";
@@ -314,6 +316,7 @@ export default async function DocumentosPage({
                         >
                           <input
                             name="approvedBy"
+                            defaultValue={userName}
                             required
                             placeholder="Aprovado por"
                             className="input max-w-[200px] text-xs"

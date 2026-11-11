@@ -10,8 +10,15 @@ import { assertUploadAllowed, MAX_TEXT_EXTRACTION_BYTES } from "@/lib/upload-lim
  * configurado (local ou S3) com a chave `org/instalação/uuid.ext`.
  */
 
+/** Nome do arquivo sem pasta. Aceita caminhos do Windows (com "\\"), que o
+ * path.basename do servidor (Linux) não separa. */
+export function plainFileName(fileName: string): string {
+  return fileName.split(/[\\/]/).filter(Boolean).pop() ?? fileName;
+}
+
 export function titleFromFileName(fileName: string): string {
-  const base = path.basename(fileName, path.extname(fileName));
+  const name = plainFileName(fileName);
+  const base = path.basename(name, path.extname(name));
   return base.replace(/[_]+/g, " ").replace(/\s+/g, " ").trim() || fileName;
 }
 
@@ -35,7 +42,7 @@ export async function saveDocumentFile(
     data: {
       title: meta.title?.trim() || titleFromFileName(file.name),
       type: meta.type?.trim() || "Documento",
-      fileName: file.name,
+      fileName: plainFileName(file.name),
       filePath: objectKey,
       mimeType,
       extractedText,
@@ -63,7 +70,7 @@ export async function registerStoredDocument(
     data: {
       title: titleFromFileName(stored.name),
       type: "Documento",
-      fileName: stored.name,
+      fileName: plainFileName(stored.name),
       filePath: stored.key,
       mimeType: stored.mimeType || "application/octet-stream",
       extractedText,

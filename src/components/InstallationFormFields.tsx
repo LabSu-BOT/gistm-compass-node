@@ -66,7 +66,7 @@ export function InstallationFormFields({ installation }: { installation?: Instal
 
       <Step n={3} title="Responsáveis">
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-          <Field label="Engenheiro de Registro (EoR)">
+          <Field label="Engenheiro de Registro (EdR / EoR)">
             <input name="eorName" defaultValue={v?.eorName ?? ""} className="input" placeholder="Nome" />
           </Field>
           <Field label="Empresa do EoR">
@@ -75,7 +75,7 @@ export function InstallationFormFields({ installation }: { installation?: Instal
           <Field label="E-mail do EoR">
             <input type="email" name="eorEmail" defaultValue={v?.eorEmail ?? ""} className="input" />
           </Field>
-          <Field label="Engenheiro Responsável (RTFE)">
+          <Field label="Engenheiro Responsável (RTER / RTFE)">
             <input name="rtfeName" defaultValue={v?.rtfeName ?? ""} className="input" />
           </Field>
           <Field label="Executivo Responsável">

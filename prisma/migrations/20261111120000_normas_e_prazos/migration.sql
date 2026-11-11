@@ -59,3 +59,13 @@ BEGIN
     GRANT SELECT, INSERT, UPDATE, DELETE ON "LegalCheck" TO gistm_app;
   END IF;
 END $$;
+
+-- Títulos e nomes de arquivo que ficaram com o caminho do Windows
+-- (importações antigas): o título vira o nome do arquivo, sem pasta e sem extensão.
+UPDATE "DocumentFile"
+SET "fileName" = regexp_replace("fileName", '^.*[\\/]', '')
+WHERE "fileName" ~ '[\\/].';
+
+UPDATE "DocumentFile"
+SET "title" = regexp_replace("fileName", '\.[^.]+$', '')
+WHERE position('\' in "title") > 0 AND "fileName" <> '';
