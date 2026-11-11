@@ -2,7 +2,7 @@ import path from "node:path";
 import { prisma } from "@/lib/prisma";
 import { buildObjectKey, getStorage } from "@/lib/storage";
 import { extractText } from "@/lib/text-extraction";
-import { assertUploadAllowed } from "@/lib/upload-limits";
+import { assertUploadAllowed, MAX_TEXT_EXTRACTION_BYTES } from "@/lib/upload-limits";
 
 /**
  * Ponto único de gravação de documentos enviados (importação na
@@ -38,6 +38,34 @@ export async function saveDocumentFile(
       fileName: file.name,
       filePath: objectKey,
       mimeType,
+      extractedText,
+      installationId,
+    },
+  });
+}
+
+/**
+ * Registra um arquivo que o navegador já enviou direto ao bucket (URL
+ * assinada). Lê o objeto do storage para extrair o texto e cria o documento.
+ */
+export async function registerStoredDocument(
+  installationId: string,
+  stored: { key: string; name: string; size: number; mimeType: string }
+) {
+  const ext = path.extname(stored.name).toLowerCase();
+  let extractedText: string | null = null;
+  // Acima do limite o documento entra sem leitura de texto (memória do servidor).
+  if (stored.size <= MAX_TEXT_EXTRACTION_BYTES) {
+    const buffer = await getStorage().get(stored.key);
+    extractedText = await extractText(buffer, ext);
+  }
+  return prisma.documentFile.create({
+    data: {
+      title: titleFromFileName(stored.name),
+      type: "Documento",
+      fileName: stored.name,
+      filePath: stored.key,
+      mimeType: stored.mimeType || "application/octet-stream",
       extractedText,
       installationId,
     },

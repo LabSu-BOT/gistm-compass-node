@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { getInstallationContext } from "@/lib/context";
 import { PageHeader, PageBody, Card, EmptyState } from "@/components/ui";
-import { importDocumentsBatch, finishImport, deleteDocument, approveDisclosure, updateDocumentDetails } from "./actions";
+import { importDocumentsBatch, finishImport, prepareDirectUploads, registerDirectUpload, deleteDocument, approveDisclosure, updateDocumentDetails } from "./actions";
 import { Trash2, ShieldCheck, AlertTriangle, Download, Search, SlidersHorizontal, Link2, EyeOff } from "lucide-react";
 import { format, isBefore } from "date-fns";
 import { ImportButton } from "@/components/ImportButton";
@@ -99,6 +99,8 @@ export default async function DocumentosPage({
         action={<ImportButton
             batchAction={importDocumentsBatch.bind(null, installation.id)}
             finishAction={finishImport.bind(null, installation.id)}
+            prepareDirect={prepareDirectUploads.bind(null, installation.id)}
+            registerDirect={registerDirectUpload.bind(null, installation.id)}
           />}
       />
 

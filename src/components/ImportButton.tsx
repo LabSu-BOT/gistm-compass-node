@@ -15,12 +15,18 @@ const MAX_FILE_BYTES = 50 * 1024 * 1024;
  * sem formulário de metadados. Seleções grandes são enviadas em lotes, um
  * depois do outro, com o progresso no botão.
  */
+type DirectPlan = { direct: boolean; uploads: { index: number; key: string; url: string }[]; rejected: string[] };
+
 export function ImportButton({
   batchAction,
   finishAction,
+  prepareDirect,
+  registerDirect,
 }: {
   batchAction: (formData: FormData) => Promise<{ imported: number; skipped: string[] }>;
   finishAction: (imported: number, skipped: string[]) => Promise<void>;
+  prepareDirect: (files: { name: string; size: number }[]) => Promise<DirectPlan>;
+  registerDirect: (stored: { key: string; name: string; size: number; mimeType: string }) => Promise<boolean>;
 }) {
   const [open, setOpen] = useState(false);
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
@@ -42,8 +48,59 @@ export function ImportButton({
     if (!input || !input.files || input.files.length === 0 || progress) return;
     const all = Array.from(input.files);
     input.value = "";
-    const skipped: string[] = all.filter((f) => f.size > MAX_FILE_BYTES).map((f) => f.name);
 
+    // 1) Envio direto ao bucket (S3), sem passar pelo servidor: aceita
+    //    arquivos grandes. Cada arquivo sobe e depois é registrado.
+    let plan: DirectPlan | null = null;
+    try {
+      plan = await prepareDirect(all.map((f) => ({ name: f.name, size: f.size })));
+    } catch {
+      plan = null;
+    }
+    if (plan?.direct) {
+      const skippedDirect = [...plan.rejected];
+      let importedDirect = 0;
+      setProgress({ done: 0, total: plan.uploads.length });
+      let done = 0;
+      let networkErrors = 0;
+      // Até 3 envios ao mesmo tempo.
+      const queue = [...plan.uploads];
+      const worker = async () => {
+        for (let u = queue.shift(); u; u = queue.shift()) {
+          const f = all[u.index];
+          try {
+            let put: Response;
+            try {
+              put = await fetch(u.url, { method: "PUT", body: f });
+            } catch (e) {
+              // Erro de rede sem resposta: em geral o bucket sem CORS liberado.
+              networkErrors++;
+              throw e;
+            }
+            if (!put.ok) throw new Error(String(put.status));
+            const ok = await registerDirect({ key: u.key, name: f.name, size: f.size, mimeType: f.type });
+            if (ok) importedDirect++;
+            else skippedDirect.push(f.name);
+          } catch {
+            skippedDirect.push(f.name);
+          }
+          done++;
+          setProgress({ done, total: plan!.uploads.length });
+        }
+      };
+      await Promise.all([worker(), worker(), worker()]);
+      const directBlocked = importedDirect === 0 && networkErrors > 0 && networkErrors === plan.uploads.length;
+      if (!directBlocked) {
+        await finishAction(importedDirect, skippedDirect);
+        setProgress(null);
+        router.refresh();
+        return;
+      }
+      // Bucket recusou o envio direto (CORS): segue pelo servidor, em lotes.
+    }
+
+    // 2) Sem bucket (storage local): envio pelo servidor, em lotes.
+    const skipped: string[] = all.filter((f) => f.size > MAX_FILE_BYTES).map((f) => f.name);
     // Lotes de até BATCH_BYTES; arquivo maior que o lote vai sozinho.
     const batches: File[][] = [];
     let current: File[] = [];
