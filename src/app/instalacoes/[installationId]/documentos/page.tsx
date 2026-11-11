@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { getInstallationContext } from "@/lib/context";
 import { PageHeader, PageBody, Card, EmptyState } from "@/components/ui";
-import { importDocuments, deleteDocument, approveDisclosure, updateDocumentDetails } from "./actions";
+import { importDocumentsBatch, finishImport, deleteDocument, approveDisclosure, updateDocumentDetails } from "./actions";
 import { Trash2, ShieldCheck, AlertTriangle, Download, Search, SlidersHorizontal, Link2, EyeOff } from "lucide-react";
 import { format, isBefore } from "date-fns";
 import { ImportButton } from "@/components/ImportButton";
@@ -96,7 +96,10 @@ export default async function DocumentosPage({
             entram só pelo nome. Limite de 50 MB por arquivo.
           </InfoTip>
         }
-        action={<ImportButton action={importDocuments.bind(null, installation.id)} />}
+        action={<ImportButton
+            batchAction={importDocumentsBatch.bind(null, installation.id)}
+            finishAction={finishImport.bind(null, installation.id)}
+          />}
       />
 
       <PageBody className="space-y-4">

@@ -57,6 +57,43 @@ export async function importDocuments(installationId: string, formData: FormData
   }
 }
 
+/**
+ * Um lote da importação em partes: o botão Importar divide a seleção em
+ * lotes pequenos e chama esta ação para cada um, porque o servidor recusa
+ * envios muito grandes de uma vez. Não mostra aviso; quem chama soma os
+ * resultados e chama `finishImport` no fim.
+ */
+export async function importDocumentsBatch(installationId: string, formData: FormData) {
+  const installation = await assertInstallationOwnership(installationId);
+  const files = formData.getAll("files").filter((f): f is File => f instanceof File && f.size > 0);
+  let imported = 0;
+  const skipped: string[] = [];
+  for (const file of files) {
+    const name = path.basename(file.name);
+    if (name.startsWith(".") || name.toLowerCase() === "thumbs.db" || name.toLowerCase() === "desktop.ini") continue;
+    try {
+      await saveDocumentFile(installation.organizationId, installationId, file);
+      imported++;
+    } catch {
+      skipped.push(name);
+    }
+  }
+  return { imported, skipped };
+}
+
+/** Fecha a importação em partes: atualiza as telas e mostra o resumo. */
+export async function finishImport(installationId: string, imported: number, skipped: string[]) {
+  await assertInstallationOwnership(installationId);
+  revalidateInstallation(installationId);
+  if (imported === 0) {
+    await flash(`Nenhum arquivo importado. Formato ou tamanho não aceito: ${skipped.slice(0, 3).join(", ")}${skipped.length > 3 ? "…" : ""}`, "warn");
+  } else if (skipped.length > 0) {
+    await flash(`${imported} arquivo(s) importado(s). ${skipped.length} ignorado(s) (formato ou mais de 50 MB): ${skipped.slice(0, 3).join(", ")}${skipped.length > 3 ? "…" : ""}`, "warn");
+  } else {
+    await flash(imported === 1 ? "Documento importado." : `${imported} documentos importados.`);
+  }
+}
+
 /** Edição dos dados opcionais do documento (antes exigidos no envio). */
 export async function updateDocumentDetails(installationId: string, documentId: string, formData: FormData) {
   await assertInstallationOwnership(installationId);

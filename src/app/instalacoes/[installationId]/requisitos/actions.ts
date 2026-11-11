@@ -82,7 +82,7 @@ async function applyAiSuggestion(
   // Remove sugestões anteriores da IA (mantém evidências anexadas manualmente
   // por um revisor humano) e recria a partir da nova leitura.
   await prisma.evidence.deleteMany({
-    where: { requirementId: requirement.id, aiGenerated: true },
+    where: { requirementId: requirement.id, aiGenerated: true, document: { installationId } },
   });
   if (evidences.length > 0) {
     await prisma.evidence.createMany({
@@ -136,6 +136,11 @@ export async function runAiSimulation(installationId: string, requirementId: str
   await flash("Sugestão da IA atualizada.");
 }
 
+// Análise em lote com a IA real (Claude) em vez da leitura por palavras-chave.
+// Desligada por padrão por causa do custo e do tempo: ligue com
+// AI_BATCH_REAL_AI=true. Sem chave da API, cai na leitura por palavras-chave.
+const BATCH_REAL_AI = process.env.AI_BATCH_REAL_AI === "true";
+
 export async function runAiSimulationForAll(installationId: string) {
   const { installation, cycle, isLatestCycle } = await getInstallationContext(installationId);
   if (!isLatestCycle) {
@@ -166,7 +171,7 @@ export async function runAiSimulationForAll(installationId: string) {
     await Promise.all(
       toAnalyze
         .slice(i, i + BATCH)
-        .map((requirement) => applyAiSuggestion(requirement, documents, installation.id, cycle.id, false))
+        .map((requirement) => applyAiSuggestion(requirement, documents, installation.id, cycle.id, BATCH_REAL_AI))
     );
   }
 
