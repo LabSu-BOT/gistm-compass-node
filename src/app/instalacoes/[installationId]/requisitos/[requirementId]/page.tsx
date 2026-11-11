@@ -268,11 +268,7 @@ export default async function RequirementDetailPage({
           <Card>
             <CardHeader
               title="Sugestão da IA"
-              subtitle={
-                assessment.aiConfidence
-                  ? `Confiança estimada ${Math.round(assessment.aiConfidence * 100)}%`
-                  : "Ainda sem sugestão"
-              }
+              subtitle={assessment.aiClassification ? "Sugestão para validar" : "Ainda sem sugestão"}
               action={
                 isLatestCycle && (
                   <form action={runAiSimulation.bind(null, installation.id, requirement.id)}>

@@ -113,9 +113,7 @@ async function applyAiSuggestion(
       assessmentId: assessment.id,
       actor: usedRealAi ? "IA (Claude)" : "IA (simulada)",
       action: "SUGESTAO_IA_GERADA",
-      note: `Classificação sugerida: ${classification}. Confiança: ${Math.round(
-        confidence * 100
-      )}%.`,
+      note: `Classificação sugerida: ${classification}.`,
     },
   });
 }

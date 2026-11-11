@@ -59,7 +59,7 @@ export default async function TechnicalDashboardPage({
           </div>
         )}
 
-        <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-6">
+        <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-5">
           <Card className="px-5 py-4">
             <p className="text-xs font-medium text-mineral-500">Divergência IA × humano</p>
             <p className="mt-1 text-2xl font-semibold tabular-nums text-mineral-900">
@@ -75,15 +75,6 @@ export default async function TechnicalDashboardPage({
               {data.noEvidence.length}
             </p>
             <p className="mt-1 text-xs text-mineral-500">de {data.totalRequirements} requisitos</p>
-          </Card>
-          <Card className="px-5 py-4">
-            <p className="text-xs font-medium text-mineral-500">Confiança média da IA</p>
-            <p className="mt-1 text-2xl font-semibold tabular-nums text-mineral-900">
-              {data.avgAiConfidence !== null ? `${data.avgAiConfidence}%` : "—"}
-            </p>
-            <p className="mt-1 text-xs text-mineral-500">
-              {data.lowConfidenceCount} sugestão(ões) abaixo de 50%
-            </p>
           </Card>
           <Card className="px-5 py-4">
             <p className="text-xs font-medium text-mineral-500">Aguardando revisão humana</p>

@@ -199,12 +199,10 @@ export function simulateAiReading(
       ? topMatches.map((s) => `"${s.doc.title}"`).join(", ")
       : "nenhum documento com correspondência textual relevante";
 
-  const percentText = Math.round(combined * 100);
   const justification =
     `A leitura automática por palavras-chave comparou este requisito com os ` +
     `${readable.length} documento(s) com texto da base documental. Os mais ` +
-    `relevantes encontrados foram: ${relevantDocsText}. A aderência textual estimada foi de ` +
-    `${percentText}%. Classificação sugerida: "${classificationLabel(classification)}", com ` +
+    `relevantes encontrados foram: ${relevantDocsText}. Classificação sugerida: "${classificationLabel(classification)}", com ` +
     `robustez de evidência "${robustnessLabel(robustness)}". Esta sugestão deve ser ` +
     `confirmada, ajustada ou rejeitada por um revisor técnico antes da validação final.`;
 
